@@ -27,7 +27,6 @@ v.1.1.0
 v.1.0.2
 
     - Fix description of dqmask.py
-<<<<<<< HEAD
     
 v.1.0.1
 
@@ -36,13 +35,4 @@ v.1.0.1
 v.1.0.0
 
     - Implement dqmask.py
-=======
-
-v.1.0.1
     
-    - Fix import modules in dqmask.py
-
-v.1.0.0
-    
-    - Implement dqmask.py
->>>>>>> c3595f1ad6457b56dd37daf9c30a5864d16d836f
