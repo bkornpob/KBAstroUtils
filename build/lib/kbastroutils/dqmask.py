@@ -8,7 +8,7 @@ class DQMask:
     x.value >>> [0,1,4]
     x.combine >>> [0,1,4,5]
     x.data >>> [13, 5, 4, 2, 1, 0]
-    x.mask >>> [[False, True, True, False, True, True]]
+    x.mask >>> [False, True, True, False, True, True]
     -----------
     value = list of DQ classes to be set to True (default: value=[0])
     -----------
@@ -37,6 +37,14 @@ class DQMask:
         self.data = None
         self.mask = None
     def make_class(self):
+        """
+        Example:
+        x.value = [0,1,4]
+        x.combine = x.make_class()
+        x.combine >>> [0,1,4,5]
+        ----------
+        make_class sums all possible combinations from x.value.
+        """
         from itertools import combinations
         import numpy as np
         out = []
@@ -52,6 +60,16 @@ class DQMask:
             out.append(0)
         return out
     def make_mask(self,data):
+        """
+        Example:
+        data = [13, 5, 4, 2, 1, 0]
+        x.combine = [0,1,4,5]
+        x.mask = x.make_mask(data)
+        x.mask >>> [False, True, True, False, True, True]
+        ----------
+        make_mask takes self.combine and data, and returns self.mask as a bool array parallel to data with 
+        x.mask[i] = True if data[i] in x.combine, and x.mask[i] = False otherwise.
+        """
         import numpy as np
         self.data = data
         self.mask = np.full_like(self.data,fill_value=False,dtype=bool)
