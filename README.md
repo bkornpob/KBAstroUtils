@@ -10,6 +10,8 @@ Tasks include:
     
     - segmentation.py = wrapper for making a segmentation map (used to be source.py in version < 1.2.0)
     
+    - sub2full.py = mapping a subarray image back to its full frame
+    
 Future
 
     - Implement: source.save, source.segmentation.remove, source.segmentation.add
