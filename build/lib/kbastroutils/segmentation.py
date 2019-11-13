@@ -1,19 +1,18 @@
-class Source:
+class Segmentation:
     """
     Example:
     file = 'abc.fits'
-    x = Source(file) >>> instantiate
+    x = Segmentation(file) >>> instantiate
     x.make_thr(do_mask=True) >>> make x.detect_thr container
     x.make_kernel() >>> make x.kernel container
     x.make_segmentation(do_mask=True,do_kernel=True,do_deblend=True) >>> make x.segmentation container
     x.make_properties() >>> make x.properties from x.segmentation
     x.properties.to_table() >>> show properties
     ----------
-    Source is a class that contains information to perform photometry. This includes:
-        - data from .fits file with ['SCI'] and ['DQ'] extensions
-        - create mask using dqmask.py
-        - create a segmentation map of sources using threshold detection algorithm
-        - smoohting kernel, and mask can be implemented
+    Segmentation is a wrapper for making a segmentation map. This includes:
+        - taking data from .fits file with ['SCI'] and ['DQ'] extensions
+        - creating mask using dqmask.py
+        - detecting sources using threshold algorithm, smoothing kernel, and mask
     ----------
     Ref:
         - Image Segmentation: https://photutils.readthedocs.io/en/stable/segmentation.html
@@ -95,8 +94,7 @@ class Source:
     def make_segmentation(self,npixels=None,nlevels=None,contrast=None
                           ,do_mask=None,do_kernel=None,do_deblend=None):
         """
-        make a segmentation map given a threshold array (from Source.make_thr), a kernel (from Source.make_kernel)
-            , and a mask (from DQMask.make_mask).
+        make a segmentation map given a threshold array (from Segmentation.make_thr), a kernel (from Segmentation.make_kernel), and a mask (from DQMask.make_mask).
         deblending of sources is implemented.
         ----------
         Ref:
@@ -148,15 +146,10 @@ class Source:
 ################################################################        
     def make_properties(self):
         """
-        characterize source properties given a segmentation map (from Source.make_segmentation)
+        characterize source properties given a segmentation map (from Segmentation.make_segmentation)
         """
         from photutils import source_properties
         data = self.data
         segmentation = self.segmentation.value
         self.properties = source_properties(data,segmentation)
-################################################################        
-    def make_phot(self,id=None):
-        """
-        perform photometry given sources in the segmentation map
-        """
-        self.phot = None
+        

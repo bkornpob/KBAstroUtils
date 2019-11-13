@@ -8,15 +8,23 @@ Tasks include:
     
     - container.py = handle declaring attibutes given keys and values
     
-    - source.py = wrapper for photometry
+    - segmentation.py = wrapper for making a segmentation map (used to be source.py in version < 1.2.0)
     
 Future
 
-    - Implement: source.make_phot
-    
+    - Implement: source.save, source.segmentation.remove, source.segmentation.add
+        
     - Implement methods in source.py to show summaries or plots
     
     - Implement other kernels in source.make_kernel
+    
+v.1.2.0
+
+    - Implement: sub2full.py
+
+    - Change: source.py to segmentation.py
+    
+    - Fix description: segmentation.py
 
 v.1.1.0
 

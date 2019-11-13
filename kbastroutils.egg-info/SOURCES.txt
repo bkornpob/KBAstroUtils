@@ -6,7 +6,8 @@ kbastroutils/.DS_Store
 kbastroutils/__init__.py
 kbastroutils/container.py
 kbastroutils/dqmask.py
-kbastroutils/source.py
+kbastroutils/segmentation.py
+kbastroutils/sub2full.py
 kbastroutils.egg-info/PKG-INFO
 kbastroutils.egg-info/SOURCES.txt
 kbastroutils.egg-info/dependency_links.txt
