@@ -12,13 +12,23 @@ Tasks include:
     
     - sub2full.py = mapping a subarray image back to its full frame
     
-Future
-
-    - Implement: source.save, source.segmentation.remove, source.segmentation.add
-        
-    - Implement methods in source.py to show summaries or plots
+    - gnd.py = wrapper, and main class for grism reduction
     
-    - Implement other kernels in source.make_kernel
+    - grismconf.py = read conf file for grism reduction
+    
+    - grismsens.py = read sens file for grism reduction
+    
+Known issues:
+
+    - ???
+    
+v.1.3.1
+
+    - Fix import
+
+v.1.3.0
+
+    - Implements: grismconf.py, gnd.py, grismsens.py
     
 v.1.2.0
 

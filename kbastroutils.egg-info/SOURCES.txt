@@ -6,6 +6,9 @@ kbastroutils/.DS_Store
 kbastroutils/__init__.py
 kbastroutils/container.py
 kbastroutils/dqmask.py
+kbastroutils/gnd.py
+kbastroutils/grismconf.py
+kbastroutils/grismsens.py
 kbastroutils/segmentation.py
 kbastroutils/sub2full.py
 kbastroutils.egg-info/PKG-INFO
