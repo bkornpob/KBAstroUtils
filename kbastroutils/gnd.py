@@ -1,3 +1,7 @@
+from astropy.io import fits
+import numpy as np
+import matplotlib.pyplot as plt
+
 class GND:
     def __init__(self,files):
         self.files = files
@@ -15,8 +19,8 @@ class GND:
                          'SCI': ['IDCSCALE','BUNIT']
                         }
                  ):
-        from astropy.io import fits
-        import numpy as np
+#         from astropy.io import fits
+#         import numpy as np
         for i in self.meta:
             x = fits.open(self.meta[i]['FILE'])
             for j in keys:

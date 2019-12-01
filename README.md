@@ -22,11 +22,13 @@ Known issues:
 
     - ???
 
-v.2.0.0a
+v.2.0.0b
 
     - New APIs: gnd.py
     
     - Implement: grismapcorr.py, make_sip.py
+    
+    - Import at header
     
 ---
 

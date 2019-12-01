@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: kbastroutils
-Version: 2.0.0a0
+Version: 2.0.0b0
 Summary: UNKNOWN
 Home-page: https://github.com/bkornpob/kbastroutils
 Author: Kornpob Bhirombhakdi
@@ -30,11 +30,13 @@ Description: # KBAstroUtils
         
             - ???
         
-        v.2.0.0a
+        v.2.0.0b
         
             - New APIs: gnd.py
             
             - Implement: grismapcorr.py, make_sip.py
+            
+            - Import at header
             
         ---
         

@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="kbastroutils",
-    version="2.0.0a",
+    version="2.0.0b",
     author="Kornpob Bhirombhakdi",
     author_email="kbhirombhakdi@stsci.edu",
     long_description=open("README.md").read(),
