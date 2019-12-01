@@ -1,6 +1,17 @@
 from astropy.io import fits
+from astropy.stats import sigma_clipped_stats
+from scipy.optimize import curve_fit
+from scipy.integrate import quad
+
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from kbastroutils.grismconf import GrismCONF
+from kbastroutils.grismsens import GrismSens
+from kbastroutils.dqmask import DQMask
+from kbastroutils.grismapcorr import GrismApCorr
+
+import copy,os,pickle
 
 class GND:
     def __init__(self,files):
@@ -19,8 +30,6 @@ class GND:
                          'SCI': ['IDCSCALE','BUNIT']
                         }
                  ):
-#         from astropy.io import fits
-#         import numpy as np
         for i in self.meta:
             x = fits.open(self.meta[i]['FILE'])
             for j in keys:
@@ -59,7 +68,6 @@ class GND:
                                   ,'XOFF_A','YOFF_A'
                                   ,'DISP_ORDER_A'
                                  ]):
-        from kbastroutils.grismconf import GrismCONF
         for i in self.pairs:
             for j in self.pairs[i]:
                 self.meta[j]['CONF'] = GrismCONF(conf)
@@ -68,7 +76,6 @@ class GND:
     ####################
     ####################
     def make_sens(self,sens):
-        from kbastroutils.grismsens import GrismSens
         for i in self.pairs:
             for j in self.pairs[i]:
                 self.meta[j]['SENS'] = GrismSens(sens)
@@ -76,10 +83,6 @@ class GND:
     ####################
     ####################
     def make_bkg(self,bkg=None,maskin=[0],method='median',sigma=3.,iters=5):
-        from kbastroutils.dqmask import DQMask
-        from astropy.io import fits
-        import numpy as np
-        from astropy.stats import sigma_clipped_stats
         for i in self.pairs:
             for j in self.pairs[i]:
                 x = fits.open(self.files[j])
@@ -109,8 +112,6 @@ class GND:
     ####################
     ####################
     def make_mastersky(self,xdata,xmask,bkgdata):
-        import numpy as np
-        from scipy.optimize import curve_fit
         x,y = bkgdata[xmask],xdata[xmask]
         popt,pcov = curve_fit(lambda x, *p: p[0]*x, x,y,p0=[1.])
         return (popt,pcov)
@@ -140,7 +141,6 @@ class GND:
     ####################
     ####################
     def make_trace(self):
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 xhbound = self.meta[j]['CONF'].value['BEAMA']
@@ -165,7 +165,6 @@ class GND:
     ####################
     ####################
     def make_wavelength(self):
-        import numpy as np
         varclength = np.vectorize(self.arclength)
         for i in self.pairs:
             for j in self.pairs[i]:
@@ -191,7 +190,6 @@ class GND:
     ####################
     ####################
     def arclength_integrand(self,Fa,*coef):
-        import numpy as np
         s = 0
         for i,ii in enumerate(coef):
             if i==0:
@@ -199,15 +197,12 @@ class GND:
             s += i * ii * (Fa**(i-1))
         return np.sqrt(1. + np.power(s,2))
     def arclength(self,Fa,*coef):
-        from scipy.integrate import quad
         integral,err = quad(self.arclength_integrand, 0., Fa, args=coef)
         return integral,err    
     ####################
     ####################
     ####################    
     def make_flat(self,method='uniform',flatfile=None):
-        import numpy as np
-        from astropy.io import fits
         for i in self.pairs:
             for j in self.pairs[i]:
                 x = fits.open(self.files[j])
@@ -247,9 +242,6 @@ class GND:
     ####################
     ####################
     def make_pam(self,method='uniform',pamfile=None):
-        from astropy.io import fits
-        import numpy as np
-        import copy
         for i in self.pairs:
             for j in self.pairs[i]:
                 x = fits.open(self.files[j])
@@ -314,8 +306,6 @@ class GND:
     ####################
     ####################
     def make_clean(self,method=[True,True,True]):
-        from astropy.io import fits
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 x = fits.open(self.files[j])
@@ -329,7 +319,6 @@ class GND:
     ####################
     ####################
     def make_stamp(self,size=20):
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 xg = self.meta[j]['XG']
@@ -341,7 +330,6 @@ class GND:
     ####################
     ####################
     def make_wavebin(self,method='WW',wavebin=None):
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 self.meta[j]['WAVEBIN'] = None
@@ -372,7 +360,6 @@ class GND:
     ####################
     ####################
     def make_apcorr(self,replace='median'):
-#         import GrismApCorr
         grismapcorr = GrismApCorr()
         for i in self.pairs:
             for j in self.pairs[i]:
@@ -385,7 +372,6 @@ class GND:
     ####################
     ####################
     def make_count(self,replace=None):
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 xg = self.meta[j]['XG'].astype(int)
@@ -414,7 +400,6 @@ class GND:
     ####################
     ####################
     def make_flam(self):
-        import numpy as np
         for i in self.pairs:
             for j in self.pairs[i]:
                 count = self.meta[j]['COUNT']
@@ -429,8 +414,6 @@ class GND:
     ####################
     ####################
     def save(self,path=None):
-        import pickle
-        import os
         if not path:
             print('Error: path is required. Terminate')
             return
@@ -456,10 +439,6 @@ class GND:
              ,xmin=None, xmax=None
              ,ymin=None, ymax=None
             ):
-        import pandas as pd
-        from astropy.io import fits
-        import numpy as np
-        import matplotlib.pyplot as plt
         if method=='meta':
             if dosort:
                 if not column:
