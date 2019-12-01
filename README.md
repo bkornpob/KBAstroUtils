@@ -21,14 +21,22 @@ Tasks include:
 Known issues:
 
     - ???
+
+v.2.0.0a
+
+    - New APIs: gnd.py
     
+    - Implement: grismapcorr.py, make_sip.py
+    
+---
+
 v.1.3.1
 
     - Fix import
 
 v.1.3.0
 
-    - Implements: grismconf.py, gnd.py, grismsens.py
+    - Implement: grismconf.py, gnd.py, grismsens.py
     
 v.1.2.0
 
