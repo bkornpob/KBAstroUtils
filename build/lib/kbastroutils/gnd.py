@@ -8,8 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from kbastroutils.grismconf import GrismCONF
 from kbastroutils.grismsens import GrismSens
-from kbastroutils.dqmask import DQMask
 from kbastroutils.grismapcorr import GrismApCorr
+from kbastroutils.dqmask import DQMask
+from kbastroutils.make_sip import make_SIP
 
 import copy,os,pickle
 

@@ -22,7 +22,7 @@ Known issues:
 
     - ???
 
-v.2.0.0c
+v.2.0.0d
 
     - New APIs: gnd.py
     
