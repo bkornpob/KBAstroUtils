@@ -2,10 +2,8 @@ from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
+from drizzlepac import astrodrizzle
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from kbastroutils.grismconf import GrismCONF
 from kbastroutils.grismsens import GrismSens
 from kbastroutils.grismapcorr import GrismApCorr
@@ -13,10 +11,14 @@ from kbastroutils.dqmask import DQMask
 from kbastroutils.make_sip import make_SIP
 
 import copy,os,pickle
+from shutil import copyfile
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 class GND:
     def __init__(self,files):
-        self.files = files
+        self.files = copy.deepcopy(files)
         self.meta = {}
         for i,ii in enumerate(files):
             self.meta[i] = {}
@@ -40,7 +42,7 @@ class GND:
                     except:
                         self.meta[i][k] = None
     def make_pair(self,pairs):
-        self.pairs = pairs
+        self.pairs = copy.deepcopy(pairs)
         for i in pairs.keys():
             gids = pairs[i]
             for j in gids:
@@ -252,6 +254,12 @@ class GND:
                 if method=='uniform':
                     self.meta[j]['PAM'] = np.full_like(xdata,1.,dtype=float)
                     self.meta[j]['PAM_FILE'] = (method,'No file')
+                elif method=='custom':
+                    if not pamfile:
+                        print('Error: pamfile is required. Terminate')
+                        return
+                    self.meta[j]['PAM'] = np.copy(fits.open(pamfile)[1].data)
+                    self.meta[j]['PAM_FILE'] = (method,pamfile)
 #                 elif method=='master':
 #                     header = copy.deepcopy(x['SCI'].header)
 #                     keys = copy.deepcopy(header.keys())
@@ -296,13 +304,6 @@ class GND:
 # A_4_0   = -2.8102976693048E-13                                                  
 # B_4_0   = -5.9243852454034E-13                      
                     
-#                     pass
-#                 elif method=='custom':
-#                     if not pamfile:
-#                         print('Error: pam file is required. Set to None')
-#                     else:                
-#                         self.meta[j]['PAM'] = pamfile
-#                         self.meta[j]['PAM_file'] = (method,'pamfile')
     ####################
     ####################
     ####################
@@ -319,13 +320,13 @@ class GND:
     ####################
     ####################
     ####################
-    def make_stamp(self,size=20):
+    def make_stamp(self,padx=5,pady=50):
         for i in self.pairs:
             for j in self.pairs[i]:
                 xg = self.meta[j]['XG']
                 yg = self.meta[j]['YG']
-                xgmin,xgmax = xg.min().astype(int),xg.max().astype(int)
-                ygmin,ygmax = yg.min().astype(int)-size,yg.max().astype(int)+size
+                xgmin,xgmax = xg.min().astype(int)-padx,xg.max().astype(int)+padx
+                ygmin,ygmax = yg.min().astype(int)-pady,yg.max().astype(int)+pady
                 self.meta[j]['STAMP'] = ((xgmin,xgmax),(ygmin,ygmax))
     ####################
     ####################
@@ -339,10 +340,14 @@ class GND:
                         print('Error: wavebin is required. Set to None')
                     else:
                         self.meta[j]['WAVEBIN'] = wavebin
-                elif method=='WW':
+                elif (method=='WW') or (method=='median'):
                     ww = np.copy(self.meta[j]['WW'])
                     wavebin = np.diff(ww)
-                    wavebin = np.concatenate((wavebin,[np.median(wavebin)]))
+                    median = np.median(wavebin)
+                    if method=='median':
+                        wavebin = np.full_like(ww,median,dtype=float)
+                    elif method=='WW':
+                        wavebin = np.concatenate((wavebin,[median]))
                     self.meta[j]['WAVEBIN'] = np.copy(wavebin)
     ####################
     ####################
@@ -434,6 +439,7 @@ class GND:
     def show(self,method='meta'
              ,column=None,dosort=True,sort = ['EXPSTART','POSTARG1','POSTARG2','FILTER']
              ,traceon=False
+             ,normalize=False
              ,showconf='long'
              ,zoom=False,dx=50,dy=50
              ,apsize=5,tracefrom='original'
@@ -452,11 +458,11 @@ class GND:
             for i in self.pairs:
                 x = fits.open(self.files[i])
                 xdata = x['SCI'].data
-                vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                m = np.where(np.isfinite(xdata))
+                vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                 plt.figure(figsize=(10,10))
                 plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                 plt.title('{0} {1}'.format(i,self.files[i]))
-
                 xyd = self.meta[i]['XYD']
                 plt.scatter(*xyd,s=500,lw=4,edgecolor='red',facecolor='None',label='XYD')
                 plt.legend()
@@ -469,7 +475,8 @@ class GND:
                 for j in self.pairs[i]:
                     x = fits.open(self.files[j])
                     xdata = x['SCI'].data
-                    vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     plt.figure(figsize=(10,10))
                     plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     plt.title('{0} {1}'.format(j,self.files[j]))
@@ -505,7 +512,7 @@ class GND:
                     print('gid',j,self.meta[j]['CONF'].file,'\n')
                     display(self.meta[j]['CONF'].value)
                     print('\n############################\n')
-        if method=='trace':
+        if method=='count':
             for i in self.pairs:
                 plt.figure(figsize=(10,10))
                 for j in self.pairs[i]:
@@ -513,7 +520,7 @@ class GND:
                     yg = self.meta[j]['YG'].astype(int)
                     ww = self.meta[j]['WW']
                     if tracefrom=='original':
-                        x = fits.open(XXX.files[j])
+                        x = fits.open(self.files[j])
                         xdata = x['SCI'].data
                     elif tracefrom=='clean':
                         xdata = self.meta[j]['CLEAN']
@@ -531,7 +538,8 @@ class GND:
                     xdata = fits.open(self.files[j])['SCI'].data
                     bkgdata = self.meta[j]['BKG']
                     subdata = xdata - bkgdata
-                    vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     ax[0].imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[1].imshow(bkgdata,origin='lower',cmap='viridis'
                                  ,vmin=np.percentile(bkgdata,5.),vmax=np.percentile(bkgdata,95.)
@@ -547,7 +555,8 @@ class GND:
                     xdata = fits.open(self.files[j])['SCI'].data
                     flatdata = self.meta[j]['FLAT']
                     normdata = xdata / flatdata
-                    vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     ax[0].imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[1].imshow(flatdata,origin='lower',cmap='viridis'
                                  ,vmin=np.percentile(flatdata,5.),vmax=np.percentile(flatdata,95.)
@@ -563,7 +572,8 @@ class GND:
                     xdata = fits.open(self.files[j])['SCI'].data
                     pamdata = self.meta[j]['PAM']
                     correctdata = xdata * pamdata
-                    vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     ax[0].imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[1].imshow(pamdata,origin='lower',cmap='viridis'
                                  ,vmin=np.percentile(pamdata,5.),vmax=np.percentile(pamdata,95.)
@@ -572,19 +582,50 @@ class GND:
                     ax[0].set_title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
                     ax[1].set_title('pam')
                     ax[2].set_title('corrected')
+        if method=='stamp':
+            for i in self.pairs:
+                for j in self.pairs[i]:
+                    xdata = fits.open(self.files[j])['SCI'].data
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                    stamp = self.meta[j]['STAMP']
+                    plt.figure(figsize=(10,10))
+                    plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                    plt.xlim(stamp[0][0],stamp[0][1])
+                    plt.ylim(stamp[1][0],stamp[1][1])
+                    plt.title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
+        if method=='WW':
+            for i in self.pairs:
+                for j in self.pairs[i]:
+                    ww = np.copy(self.meta[j]['WW'])
+                    xg = np.copy(self.meta[j]['XG'])
+                    if normalize:
+                        xg -= self.meta[j]['XYREF'][0]
+                    plt.plot(xg,ww,label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                    plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)                     
+        if method=='trace':
+            for i in self.pairs:
+                for j in self.pairs[i]:
+                    yg = np.copy(self.meta[j]['YG'])
+                    xg = np.copy(self.meta[j]['XG'])
+                    if normalize:
+                        xg -= self.meta[j]['XYREF'][0]
+                        yg -= self.meta[j]['XYREF'][1]
+                    plt.plot(xg,yg,label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                    plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)
         if method=='clean':
             for i in self.pairs:
                 for j in self.pairs[i]:
                     fig,ax = plt.subplots(1,2,figsize=(20,10))
                     xdata = fits.open(self.files[j])['SCI'].data
                     cleandata = self.meta[j]['CLEAN']
-                    vmin,vmax = np.percentile(xdata,5.),np.percentile(xdata,95.)
+                    m = np.where(np.isfinite(xdata))
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     ax[0].imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[1].imshow(cleandata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[0].set_title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
                     ax[1].set_title('clean')
         if method=='flam':
-            import matplotlib.pyplot as plt
             for i in self.pairs:
                 plt.figure(figsize=(10,10))
                 for j in self.pairs[i]:
@@ -604,3 +645,50 @@ class GND:
                     ymax = np.max(flam[mask]) if not ymax else ymax
                     plt.ylim(ymin,ymax)
                 plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)                     
+    ####################
+    ####################
+    ####################                
+    def make_drz(self):
+        num = len(self.files)
+        self.make_clean(method=[True,True,False])
+        for i in self.pairs:
+            x = []
+            for j in self.pairs[i]:
+                dst = os.getcwd() + '/' + self.files[j].split('/')[-1]
+                copyfile(self.files[j],dst)
+                xx = fits.open(dst)
+                stamp = self.meta[j]['STAMP']
+                xx['SCI'].data[stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]] = np.copy(self.meta[j]['CLEAN'][stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]])
+                xx.writeto(dst,overwrite=True)
+                xx.close()                  
+                x.append(dst)
+            path = os.getcwd() + '/{0}'.format(num)
+            drz = path + '_drz.fits'
+            astrodrizzle.AstroDrizzle(x
+                                      ,output=path
+                                      ,build=True
+                                      ,clean=True
+                                      ,skysub='no'
+                                      ,final_wcs=True
+                                      ,final_kernel='gaussian'
+                                      ,combine_type='median'
+                                      ,final_refimage=x[0]
+                                     ) 
+            self.make_drzmeta(i,num,drz,ref=0)
+            for j in x:
+                os.remove(j)
+            num += 1
+    def make_drzmeta(self,direct,num,drz,ref=0):
+        self.files.append(drz)
+        self.pairs[direct].append(num)
+        i = self.pairs[direct][ref]
+        xdata = fits.open(drz)['SCI'].data
+        self.meta[num] = copy.deepcopy(self.meta[i])
+        self.meta[num]['ID'] = num
+        self.meta[num]['FILE'] = drz
+        self.meta[num]['BKG'],self.meta[num]['BKG_FILE'] = np.full_like(xdata,0.,dtype=float),'drz'
+        self.meta[num]['FLAT'],self.meta[num]['FLAT_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
+        self.meta[num]['PAM'],self.meta[num]['PAM_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
+    ####################
+    ####################
+    ####################

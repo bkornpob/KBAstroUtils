@@ -6,7 +6,7 @@ class GrismApCorr:
                   ,'filter': 'G102'
                   ,'scale': 0.13
                   ,'scaleunit': 'arcsec/pix'
-                  ,'type': 'half apsize'
+                  ,'type': 'diameter'
                   ,'row': 'apsize'
                   ,'col': 'wave'
                   ,'apunit': 'arcsec'
@@ -37,7 +37,7 @@ class GrismApCorr:
                   ,'filter': 'G141'
                   ,'scale': 0.13
                   ,'scaleunit': 'arcsec/pix'
-                  ,'type': 'half apsize'
+                  ,'type': 'diameter'
                   ,'row': 'apsize'
                   ,'col': 'wave'
                   ,'apunit': 'arcsec'
@@ -72,7 +72,7 @@ class GrismApCorr:
         from scipy.interpolate import interp2d
         import copy
         for i in self.instrument:
-            apsize = np.copy(self.table[i]['apsize'])
+            apsize = 0.5 * np.copy(self.table[i]['apsize'])
             wave = np.copy(self.table[i]['wave'])
             value = np.copy(self.table[i]['value'])
             model = interp2d(wave,apsize,value,kind='linear',copy=True
@@ -92,10 +92,11 @@ class GrismApCorr:
         elif (apunittab=='pix') & (apunit=='arcsec'):
             apsize2 = self.arcsec2pix(instrument,apsize)
         value = model(wave,apsize2)
+        if replace=='median':
+            median = np.median(value[np.where(np.isfinite(value))])
+            value[np.where(~np.isfinite(value))] = median
         value[np.where(value <= 0.)] = 0.
-        value[np.where(value >= 1.)] = 1.
-        median = np.median(value[np.isfinite(value)])
-        value[np.where(~np.isfinite(value))] = median
+        value[np.where(value >= 1.)] = 1.        
         return value
     def pix2arcsec(self,instrument=None,pixsize=None):
         out = None

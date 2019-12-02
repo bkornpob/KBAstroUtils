@@ -18,17 +18,21 @@ Tasks include:
     
     - grismsens.py = read sens file for grism reduction
     
+    - grismapcorr.py = read aperture correction table, and calculate aperture correction factor
+    
+    - make_sip.py = calculate Simple Imaging Polynomial (SIP)
+    
 Known issues:
 
-    - ???
+    - No description/documentation
 
-v.2.0.0d
+v.2.0.0
 
     - New APIs: gnd.py
     
-    - Implement: grismapcorr.py, make_sip.py
+    - Demo provided
     
-    - Import at header
+    - Implement: grismapcorr.py, make_sip.py
     
 ---
 
