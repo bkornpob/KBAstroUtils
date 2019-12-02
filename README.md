@@ -22,9 +22,27 @@ Tasks include:
     
     - make_sip.py = calculate Simple Imaging Polynomial (SIP)
     
+    - photapcorr.py = read photometric calibration table, and prepare calibration factors (i.e., encircled energy correction, and photometric AB zeropoint)
+    
+    - mag2flux.py = converting ABmag to flam
+        
 Known issues:
 
     - No description/documentation
+    
+    - Handling other telescopes
+        
+    - flux2mag.py
+    
+    - AB2Vega.py
+    
+    - Vega2AB.py
+
+v.2.1.0a
+
+    - Add functionalities in GND.show(method='clean', traceon=True, zoom=True)
+    
+    - Implement: photapcorr.py, mag2flux.py
 
 v.2.0.0
 

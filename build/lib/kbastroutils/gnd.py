@@ -3,12 +3,15 @@ from astropy.stats import sigma_clipped_stats
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
 from drizzlepac import astrodrizzle
+from photutils import CircularAnnulus,CircularAperture,aperture_photometry
+from photutils.utils import calc_total_error
 
 from kbastroutils.grismconf import GrismCONF
 from kbastroutils.grismsens import GrismSens
 from kbastroutils.grismapcorr import GrismApCorr
 from kbastroutils.dqmask import DQMask
 from kbastroutils.make_sip import make_SIP
+from kbastroutils.photapcorr import PhotApCorr
 
 import copy,os,pickle
 from shutil import copyfile
@@ -25,7 +28,7 @@ class GND:
             self.meta[i]['ID'] = i
             self.meta[i]['FILE'] = ii
     def make_meta(self
-                  ,keys={'PRIMARY': ['INSTRUME','FILTER'
+                  ,keys={'PRIMARY': ['INSTRUME','DETECTOR','FILTER'
                                      ,'EXPSTART','EXPTIME'
                                      ,'POSTARG1','POSTARG2'
                                      ,'SUBARRAY'
@@ -63,6 +66,74 @@ class GND:
     def make_xyd(self,XYD):
         for i in XYD:
             self.meta[i]['XYD'] = XYD[i]
+    ####################
+    ####################
+    ####################
+    def make_photparams(self,method='aperture',apsize=5,apunit='pix',maskin=None
+                        ,sigma=3.,iters=5
+                        ,dobkgann=True,bkgann=(20.,25.)
+                       ):
+        for j in self.pairs:
+            instrument = '-'.join((self.meta[j]['INSTRUME'],self.meta[j]['DETECTOR']))
+            self.meta[j]['PHOT_PARAMS'] = {}
+            self.meta[j]['PHOT_PARAMS']['INSTRUMENT'] = instrument
+            self.meta[j]['PHOT_PARAMS']['FILTER'] = self.meta[j]['FILTER']
+            self.meta[j]['PHOT_PARAMS']['METHOD'] = method
+            self.meta[j]['PHOT_PARAMS']['APSIZE'] = apsize
+            self.meta[j]['PHOT_PARAMS']['APUNIT'] = apunit
+            self.meta[j]['PHOT_PARAMS']['MASKIN'] = maskin
+            self.meta[j]['PHOT_PARAMS']['SIGMA'] = sigma
+            self.meta[j]['PHOT_PARAMS']['ITERS'] = iters
+            self.meta[j]['PHOT_PARAMS']['DOBKGANN'] = dobkgann
+            self.meta[j]['PHOT_PARAMS']['BKGANN'] = bkgann
+    def make_phot(self):
+        mean,median,std,error = [],[],[],[]
+        for i in self.pairs:
+            xdata = fits.open(self.files[i])['SCI'].data
+            exptime = self.meta[i]['EXPTIME']
+            photparams = copy.deepcopy(self.meta[i]['PHOT_PARAMS'])
+            photapcorr = PhotApCorr()
+            if photparams['APUNIT']!='pix':
+                print('Error: apunit must be pix. Terminate')
+                continue
+            if photparams['MASKIN']:
+                print('Error: maskin is not implemented in this version. Terminate')
+                continue
+            if photparams['INSTRUMENT'] not in photapcorr.instrument:
+                print('Error: instrument does not match PhotApCorr.instrument. Terminate')
+                continue
+            m = np.isfinite(xdata)
+            error = calc_total_error(data=xdata,bkg_error=np.zeros_like(xdata),effective_gain=exptime)
+            xyd = self.meta[i]['XYD']
+            ap = CircularAperture((xyd[0],xyd[1]),r=photparams['APSIZE'])
+            aptab = aperture_photometry(xdata,ap,error=error)
+            ann = CircularAnnulus((xyd[0],xyd[1]),r_in=photparams['BKGANN'][0],r_out=photparams['BKGANN'][1])
+            bkgtab = aperture_photometry(xdata,ann,error=error)
+            bkg,bkg_error = None,None
+            if photparams['DOBKGANN']:
+                bkg = bkgtab['aperture_sum'] * ap.area / ann.area
+                ebkg = bkgtab['aperture_sum_err'] * ap.area / ann.area
+            else:
+                bkg,bkg_error = 0.,0.
+            ZP = None
+            for j in photapcorr.table[photparams['INSTRUMENT']]['ZP']:
+                if j[0]==photparams['FILTER']:
+                    wave = float(j[1])
+                    ZP = float(j[2])
+                    self.meta[i]['PHOT_PARAMS']['ZP'] = copy.deepcopy(j)
+            if not ZP:
+                print('Error: filter does not match PhotApCorr.table. Terminate')
+                continue
+            apsize = copy.deepcopy(photparams['APSIZE'])
+            if photparams['APUNIT']=='pix':
+                if photapcorr.table[photparams['INSTRUMENT']]['scaleunit']=='arcsec/pix':
+                    apsize = apsize * photapcorr.table[photparams['INSTRUMENT']]['scale']
+                elif photapcorr.table[photparams['INSTRUMENT']]['scaleunit']=='pix/arcsec':
+                    apsize = apsize / photapcorr.table[photparams['INSTRUMENT']]['scale']
+            EE = photapcorr.table[photparams['INSTRUMENT']]['model'](wave,apsize)
+            mag = -2.5 * np.log10((aptab['aperture_sum'] - bkg) / EE) + ZP
+            emag = -2.5 * np.sqrt(aptab['aperture_sum_err']**2 + ebkg**2) / ((aptab['aperture_sum'] - bkg) * np.log(10.))
+            self.meta[i]['ABMAG'] = (mag[0],emag[0])
     ####################
     ####################
     ####################
@@ -260,50 +331,9 @@ class GND:
                         return
                     self.meta[j]['PAM'] = np.copy(fits.open(pamfile)[1].data)
                     self.meta[j]['PAM_FILE'] = (method,pamfile)
-#                 elif method=='master':
-#                     header = copy.deepcopy(x['SCI'].header)
-#                     keys = copy.deepcopy(header.keys())
-#                     A
-#                     for i in keys:
-                    
-           
-        
-#         for i in list(x[1].header.keys()):
-#     if i[0:2]=='A_':
-#         print(i)
-        
-        
-        
-        
-        
-        
-# A_ORDER =                    4                                                  
-# B_ORDER =                    4                                                  
-# A_0_2   = 5.33092691853019E-08                                                  
-# B_0_2   = 2.99270373714981E-05                                                  
-# A_1_1   = 2.44084308174762E-05                                                  
-# B_1_1   = -1.7107385824843E-07                                                  
-# A_2_0   = -2.4133465663211E-07                                                  
-# B_2_0   = 6.95458963321812E-06                                                  
-# A_0_3   = 3.73753772880087E-11                                                  
-# B_0_3   = -2.3813607426051E-10                                                  
-# A_1_2   = 2.81394789152228E-11                                                  
-# B_1_2   = 6.31243430776636E-11                                                  
-# A_2_1   = 1.29289254704036E-10                                                  
-# B_2_1   = -3.0827896112996E-10                                                  
-# A_3_0   = -2.3716200728180E-10                                                  
-# B_3_0   = 3.51974158902385E-11                                                  
-# A_0_4   = -2.0211147283637E-13                                                  
-# B_0_4   = 7.23205168173609E-13                                                  
-# A_1_3   = 5.17856894659408E-13                                                  
-# B_1_3   = -5.1674434652779E-14                                                  
-# A_2_2   = 2.35753629384072E-14                                                  
-# B_2_2   = -1.7580091715687E-13                                                  
-# A_3_1   = 5.43714947358335E-13                                                  
-# B_3_1   = 5.60993015610249E-14                                                  
-# A_4_0   = -2.8102976693048E-13                                                  
-# B_4_0   = -5.9243852454034E-13                      
-                    
+                elif method=='master':
+                    print('Error: master method is not available in this version. Terminate')
+                    return
     ####################
     ####################
     ####################
@@ -625,6 +655,21 @@ class GND:
                     ax[1].imshow(cleandata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[0].set_title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
                     ax[1].set_title('clean')
+                    if traceon:
+                        xg = self.meta[j]['XG']
+                        yg = self.meta[j]['YG']
+                        ax[0].plot(xg,yg,color='red',label='trace')
+                        ax[1].plot(xg,yg,color='red',label='trace')
+                        plt.legend()
+                    if zoom:
+                        xmin = self.meta[j]['XG'].min() - dx
+                        xmax = self.meta[j]['XG'].max() + dx + 1
+                        ax[0].set_xlim(xmin,xmax)
+                        ax[1].set_xlim(xmin,xmax)
+                        ymin = self.meta[j]['YG'].min() - dy
+                        ymax = self.meta[j]['YG'].max() + dy + 1
+                        ax[0].set_ylim(ymin,ymax)
+                        ax[1].set_ylim(ymin,ymax)
         if method=='flam':
             for i in self.pairs:
                 plt.figure(figsize=(10,10))

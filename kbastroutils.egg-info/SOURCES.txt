@@ -2,6 +2,7 @@
 LICENSE
 README.md
 setup.py
+demo/demo.ipynb
 kbastroutils/.DS_Store
 kbastroutils/__init__.py
 kbastroutils/container.py
@@ -10,7 +11,9 @@ kbastroutils/gnd.py
 kbastroutils/grismapcorr.py
 kbastroutils/grismconf.py
 kbastroutils/grismsens.py
+kbastroutils/mag2flux.py
 kbastroutils/make_sip.py
+kbastroutils/photapcorr.py
 kbastroutils/segmentation.py
 kbastroutils/sub2full.py
 kbastroutils.egg-info/PKG-INFO
