@@ -449,7 +449,7 @@ class GND:
     ####################
     ####################
     ####################
-    def save(self,path=None):
+    def save(self,path=None,filename='GND.pickle'):
         if not path:
             print('Error: path is required. Terminate')
             return
@@ -459,7 +459,7 @@ class GND:
             os.mkdir(path)
         except:
             pass
-        file = path + 'GND.pickle'
+        file = path + filename
         f = open(file,'wb')
         pickle.dump(self,f)
         f.close()
@@ -468,7 +468,7 @@ class GND:
     ####################
     def show(self,method='meta'
              ,column=None,dosort=True,sort = ['EXPSTART','POSTARG1','POSTARG2','FILTER']
-             ,traceon=False
+             ,traceon=False,dqon=False
              ,normalize=False
              ,showconf='long'
              ,zoom=False,dx=50,dy=50
@@ -616,6 +616,7 @@ class GND:
             for i in self.pairs:
                 for j in self.pairs[i]:
                     xdata = fits.open(self.files[j])['SCI'].data
+                    xdq = fits.open(self.files[j])['DQ'].data
                     m = np.where(np.isfinite(xdata))
                     vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     stamp = self.meta[j]['STAMP']
@@ -624,6 +625,12 @@ class GND:
                     plt.xlim(stamp[0][0],stamp[0][1])
                     plt.ylim(stamp[1][0],stamp[1][1])
                     plt.title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                    if dqon:
+                        plt.figure(figsize=(10,10))
+                        plt.imshow(xdq,origin='lower',cmap='viridis',vmin=0,vmax=1)
+                        plt.xlim(stamp[0][0],stamp[0][1])
+                        plt.ylim(stamp[1][0],stamp[1][1])
+                        plt.title('DQ vmin=0, vmax=1')
         if method=='WW':
             for i in self.pairs:
                 for j in self.pairs[i]:
@@ -632,6 +639,8 @@ class GND:
                     if normalize:
                         xg -= self.meta[j]['XYREF'][0]
                     plt.plot(xg,ww,label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                    plt.xlabel('pix X')
+                    plt.ylabel('wavelength')
                     plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)                     
         if method=='trace':
             for i in self.pairs:
@@ -642,6 +651,8 @@ class GND:
                         xg -= self.meta[j]['XYREF'][0]
                         yg -= self.meta[j]['XYREF'][1]
                     plt.plot(xg,yg,label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                    plt.xlabel('pix x')
+                    plt.ylabel('pix y')
                     plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)
         if method=='clean':
             for i in self.pairs:
@@ -678,10 +689,11 @@ class GND:
                     flamunit = self.meta[j]['FLAMUNIT']
                     ww = self.meta[j]['WW']
                     wwunit = self.meta[j]['WWUNIT']
-                    if xmin or xmax:
-                        xmin = np.min(ww) if not xmin else xmin
-                        xmax = np.max(ww) if not xmax else xmax
-                        mask = np.where((ww>=xmin) & (ww<=xmax))
+                    if not xmin:
+                        xmin = np.min(ww)
+                    if not xmax:
+                        xmax = np.max(ww)
+                    mask = np.where((ww>=xmin) & (ww<=xmax))
                     plt.plot(ww[mask],flam[mask],label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
                 plt.ylabel('{0}'.format(flamunit))
                 plt.xlabel('{0}'.format(wwunit))

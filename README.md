@@ -37,8 +37,16 @@ Known issues:
     - AB2Vega.py
     
     - Vega2AB.py
+    
+v.2.2.0
 
-v.2.1.0a
+    - GND.save takes filename
+    
+    - Fix GND.show(method='flam') handling xmin, xmax
+    
+    - GND.show(method='stamp') takes dqon
+
+v.2.1.0
 
     - Add functionalities in GND.show(method='clean', traceon=True, zoom=True)
     

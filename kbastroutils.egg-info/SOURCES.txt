@@ -2,6 +2,7 @@
 LICENSE
 README.md
 setup.py
+demo/.DS_Store
 demo/demo.ipynb
 kbastroutils/.DS_Store
 kbastroutils/__init__.py
