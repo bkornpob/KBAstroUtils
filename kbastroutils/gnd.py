@@ -1,10 +1,13 @@
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
+from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
 from drizzlepac import astrodrizzle
 from photutils import CircularAnnulus,CircularAperture,aperture_photometry
 from photutils.utils import calc_total_error
+from photutils import centroid_sources,centroid_2dg,centroid_com
 
 from kbastroutils.grismconf import GrismCONF
 from kbastroutils.grismsens import GrismSens
@@ -32,9 +35,12 @@ class GND:
                                      ,'EXPSTART','EXPTIME'
                                      ,'POSTARG1','POSTARG2'
                                      ,'SUBARRAY'
+                                     ,'RA_TARG','DEC_TARG'
                                     ],
                          'SCI': ['IDCSCALE','BUNIT']
                         }
+                  ,grisms=('G102','G141')
+                  ,directs=('F140W','F160W','F098M','F105W')
                  ):
         for i in self.meta:
             x = fits.open(self.meta[i]['FILE'])
@@ -44,13 +50,57 @@ class GND:
                         self.meta[i][k] = x[j].header[k]
                     except:
                         self.meta[i][k] = None
-    def make_pair(self,pairs):
-        self.pairs = copy.deepcopy(pairs)
-        for i in pairs.keys():
-            gids = pairs[i]
-            for j in gids:
-                self.meta[j]['DIRECT'] = i
-                self.meta[j]['XYDIF'] = self.find_xydif(j,i)
+        self.make_grismNdirect(grisms,directs)
+    def make_grismNdirect(self,grisms,directs):
+        gid,did = [],[]
+        meta = pd.DataFrame(self.meta).T
+        for i in meta['ID']:
+            f = meta['FILTER'][meta['ID']==i].values[0]
+            if f in grisms:
+                gid.append(i)
+            elif f in directs:
+                did.append(i)
+            else:
+                print('Error: {0} cannot be assigned to either grism or direct. Skip'.format(f))
+                continue
+        self.gid = gid
+        self.did = did        
+    ####################
+    ####################
+    ####################
+    def make_pair(self,pairs=None):
+        if pairs:
+            self.pairs = copy.deepcopy(pairs)
+            for i in pairs.keys():
+                gids = pairs[i]
+                for j in gids:
+                    self.meta[j]['DIRECT'] = i
+                    self.meta[j]['XYDIF'] = self.find_xydif(j,i)
+        else:
+            pairs = self.make_pairauto(by='EXPSTART')
+            self.make_pair(pairs)
+    def make_pairauto(self,by):
+        gid = copy.deepcopy(self.gid)
+        did = copy.deepcopy(self.did)
+        dmeta = {}
+        for i in self.did:
+            dmeta[i] = self.meta[i]
+        dtab = pd.DataFrame(dmeta).T
+        did,dval = dtab['ID'].values,dtab[by].values
+        tmp = []
+        for i in self.gid:
+            gval = self.meta[i][by]
+            tmpp = np.abs(dval-gval)
+            tmppp = np.where(tmpp == np.min(tmpp))[0][0]
+            tmp.append((did[tmppp],i))
+        out = {}
+        for i in tmp:
+            if i[0] not in out.keys():
+                out[i[0]] = [i[1]]
+            else:
+                tmpppp = out[i[0]]
+                tmpppp.append(i[1])
+        return out
     def find_xydif(self,gid,did):
         post1g,post2g = self.meta[gid]['POSTARG1'],self.meta[gid]['POSTARG2']
         post1d,post2d = self.meta[did]['POSTARG1'],self.meta[did]['POSTARG2']
@@ -63,9 +113,55 @@ class GND:
     ####################
     ####################
     ####################
-    def make_xyd(self,XYD):
-        for i in XYD:
-            self.meta[i]['XYD'] = XYD[i]
+    def make_xyd(self,XYD=None
+                 ,inittype='header'
+                 ,adjust=True,box_size=25,maskin=[0]
+                ):
+        if XYD:
+            for i in XYD:
+                self.meta[i]['XYD'] = XYD[i]
+        else:
+            init = self.make_xydinit(inittype)
+            if not init:
+                return
+            if adjust:
+                xyd = self.make_xydadjust(init,box_size,maskin)
+            else:
+                xyd = copy.deepcopy(init)
+            if not xyd:
+                print('Error: xyd is required. Terminate')
+                return
+            self.make_xyd(xyd)
+    def make_xydinit(self,inittype):
+        out = {}
+        if inittype=='header':
+            for i in self.did:
+                ra,dec = self.meta[i]['RA_TARG'],self.meta[i]['DEC_TARG']
+                w = WCS(fits.open(self.files[i])['SCI'])
+                coord = SkyCoord(ra,dec,unit='deg')
+                xx,yy = w.all_world2pix(coord.ra,coord.dec,1)
+                out[i] = copy.deepcopy((xx,yy))
+            return out
+        else:
+            print("Error: only inittype='header' is available. Terminate")
+            return False 
+    def make_xydadjust(self,init,box_size,maskin):
+        out = {}
+        for i in self.did:
+            x = fits.open(self.files[i])
+            xdata = x['SCI'].data
+            xdq = x['DQ'].data
+            xi,yi = int(init[i][0]),int(init[i][1])
+            mask = DQMask(maskin)
+            mask.make_mask(xdq)
+            xx,yy = centroid_sources(xdata,xi,yi,box_size=box_size,mask=~mask.mask)
+            tmp = np.full_like(xdata,False,dtype=bool)
+            xi,yi = int(xx[0]),int(yy[0])
+            tmp[yi-box_size:yi+box_size+1,xi-box_size:xi+box_size+1] = True
+            newmask = (mask.mask & tmp)
+            xx,yy = centroid_2dg(xdata,mask=~newmask)            
+            out[i] = copy.deepcopy((xx,yy))
+        return out
     ####################
     ####################
     ####################
@@ -475,17 +571,19 @@ class GND:
              ,apsize=5,tracefrom='original'
              ,xmin=None, xmax=None
              ,ymin=None, ymax=None
+             ,output=False
             ):
         if method=='meta':
-            if dosort:
-                if not column:
-                    display(pd.DataFrame(self.meta).T.sort_values(sort))
-                elif column:
-                    display(pd.DataFrame(self.meta).T.sort_values(sort)[column])
+            tab = pd.DataFrame(self.meta).T
+            if output:
+                return tab
             else:
-                display(pd.DataFrame(self.meta).T)
+                if dosort:
+                    display(tab.sort_values(sort))
+                else:
+                    display(tab)
         if method=='direct':
-            for i in self.pairs:
+            for i in self.did:
                 x = fits.open(self.files[i])
                 xdata = x['SCI'].data
                 m = np.where(np.isfinite(xdata))
@@ -705,47 +803,47 @@ class GND:
     ####################
     ####################
     ####################                
-    def make_drz(self):
-        num = len(self.files)
-        self.make_clean(method=[True,True,False])
-        for i in self.pairs:
-            x = []
-            for j in self.pairs[i]:
-                dst = os.getcwd() + '/' + self.files[j].split('/')[-1]
-                copyfile(self.files[j],dst)
-                xx = fits.open(dst)
-                stamp = self.meta[j]['STAMP']
-                xx['SCI'].data[stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]] = np.copy(self.meta[j]['CLEAN'][stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]])
-                xx.writeto(dst,overwrite=True)
-                xx.close()                  
-                x.append(dst)
-            path = os.getcwd() + '/{0}'.format(num)
-            drz = path + '_drz.fits'
-            astrodrizzle.AstroDrizzle(x
-                                      ,output=path
-                                      ,build=True
-                                      ,clean=True
-                                      ,skysub='no'
-                                      ,final_wcs=True
-                                      ,final_kernel='gaussian'
-                                      ,combine_type='median'
-                                      ,final_refimage=x[0]
-                                     ) 
-            self.make_drzmeta(i,num,drz,ref=0)
-            for j in x:
-                os.remove(j)
-            num += 1
-    def make_drzmeta(self,direct,num,drz,ref=0):
-        self.files.append(drz)
-        self.pairs[direct].append(num)
-        i = self.pairs[direct][ref]
-        xdata = fits.open(drz)['SCI'].data
-        self.meta[num] = copy.deepcopy(self.meta[i])
-        self.meta[num]['ID'] = num
-        self.meta[num]['FILE'] = drz
-        self.meta[num]['BKG'],self.meta[num]['BKG_FILE'] = np.full_like(xdata,0.,dtype=float),'drz'
-        self.meta[num]['FLAT'],self.meta[num]['FLAT_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
-        self.meta[num]['PAM'],self.meta[num]['PAM_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
+#     def make_drz(self):
+#         num = len(self.files)
+#         self.make_clean(method=[True,True,False])
+#         for i in self.pairs:
+#             x = []
+#             for j in self.pairs[i]:
+#                 dst = os.getcwd() + '/' + self.files[j].split('/')[-1]
+#                 copyfile(self.files[j],dst)
+#                 xx = fits.open(dst)
+#                 stamp = self.meta[j]['STAMP']
+#                 xx['SCI'].data[stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]] = np.copy(self.meta[j]['CLEAN'][stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]])
+#                 xx.writeto(dst,overwrite=True)
+#                 xx.close()                  
+#                 x.append(dst)
+#             path = os.getcwd() + '/{0}'.format(num)
+#             drz = path + '_drz.fits'
+#             astrodrizzle.AstroDrizzle(x
+#                                       ,output=path
+#                                       ,build=True
+#                                       ,clean=True
+#                                       ,skysub='no'
+#                                       ,final_wcs=True
+#                                       ,final_kernel='gaussian'
+#                                       ,combine_type='median'
+#                                       ,final_refimage=x[0]
+#                                      ) 
+#             self.make_drzmeta(i,num,drz,ref=0)
+#             for j in x:
+#                 os.remove(j)
+#             num += 1
+#     def make_drzmeta(self,direct,num,drz,ref=0):
+#         self.files.append(drz)
+#         self.pairs[direct].append(num)
+#         i = self.pairs[direct][ref]
+#         xdata = fits.open(drz)['SCI'].data
+#         self.meta[num] = copy.deepcopy(self.meta[i])
+#         self.meta[num]['ID'] = num
+#         self.meta[num]['FILE'] = drz
+#         self.meta[num]['BKG'],self.meta[num]['BKG_FILE'] = np.full_like(xdata,0.,dtype=float),'drz'
+#         self.meta[num]['FLAT'],self.meta[num]['FLAT_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
+#         self.meta[num]['PAM'],self.meta[num]['PAM_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
     ####################
     ####################
     ####################

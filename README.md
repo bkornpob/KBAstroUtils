@@ -28,6 +28,8 @@ Tasks include:
         
 Known issues:
 
+    - Memory
+    
     - No description/documentation
     
     - Handling other telescopes
@@ -37,6 +39,16 @@ Known issues:
     - AB2Vega.py
     
     - Vega2AB.py
+    
+v.2.3.0
+
+    - GND.make_pairs(pairs=None) can automatically make pairs
+    
+    - GND.make_xyd(xyd=None, init=init, inittype='radec') can automatically find a centroid given init
+    
+    - GND.show(method='meta', output=True) returns the table instead of displaying it
+    
+    - GND.make_drz() is deactivated
     
 v.2.2.0
 
