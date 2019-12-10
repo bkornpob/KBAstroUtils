@@ -20,6 +20,8 @@ Tasks include:
     
     - grismapcorr.py = read aperture correction table, and calculate aperture correction factor
     
+    - grismmeta.py = construct meta info
+    
     - make_sip.py = calculate Simple Imaging Polynomial (SIP)
     
     - photapcorr.py = read photometric calibration table, and prepare calibration factors (i.e., encircled energy correction, and photometric AB zeropoint)
@@ -27,6 +29,8 @@ Tasks include:
     - mag2flux.py = converting ABmag to flam
         
 Known issues:
+
+    - ACS photometric zeropoints are set to 0.
 
     - Memory
     
@@ -40,6 +44,26 @@ Known issues:
     
     - Vega2AB.py
     
+    - WFC3 subarray
+    
+Next
+    
+    - Combine 1D spectra
+    
+    - Use assertion for error handling (http://swcarpentry.github.io/python-novice-inflammation/09-defensive/index.html)
+    
+    - HST-ACS-WFC flux calibration
+        
+v.2.4.0
+
+    - Implement grismmeta.py
+    
+    - HST-ACS-WFC is available for wavelength calibration, but not flux calibration
+    
+    - HST-ACS-WFC subarray is applicable
+    
+    - Change the construction of GrismCONF, and GrismSens
+        
 v.2.3.0
 
     - GND.make_pairs(pairs=None) can automatically make pairs

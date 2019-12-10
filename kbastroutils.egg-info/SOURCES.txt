@@ -3,7 +3,6 @@ LICENSE
 README.md
 setup.py
 demo/.DS_Store
-demo/demo.ipynb
 kbastroutils/.DS_Store
 kbastroutils/__init__.py
 kbastroutils/container.py
@@ -11,6 +10,7 @@ kbastroutils/dqmask.py
 kbastroutils/gnd.py
 kbastroutils/grismapcorr.py
 kbastroutils/grismconf.py
+kbastroutils/grismmeta.py
 kbastroutils/grismsens.py
 kbastroutils/mag2flux.py
 kbastroutils/make_sip.py

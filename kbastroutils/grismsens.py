@@ -1,8 +1,15 @@
+import pandas as pd
+from scipy.interpolate import interp1d
+from astropy.io import fits
 class GrismSens:
-    def __init__(self,file):
-        import pandas as pd
-        from scipy.interpolate import interp1d
-        from astropy.io import fits
+    def __init__(self,sens,meta):
+        DETERMINANT = {('HST','ACS','WFC'): 'CCDCHIP',
+                       ('HST','WFC3','IR'): 'FILTER'
+                      }
+        instrument = (meta['TELESCOP'],meta['INSTRUME'],meta['DETECTOR'])
+        det = DETERMINANT[instrument]
+        val = meta[det]
+        file = sens[val]
         self.file = file
         x = fits.open(self.file)
         xdata = pd.DataFrame(x[1].data.tolist())

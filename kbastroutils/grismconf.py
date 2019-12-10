@@ -1,3 +1,5 @@
+import numpy as np
+import copy
 class GrismCONF:
     """
     Example:
@@ -8,7 +10,14 @@ class GrismCONF:
     
     GrismCONF is a class handling the read of the .conf files for grism reduction.
     """
-    def __init__(self,file):
+    def __init__(self,conf,meta):
+        DETERMINANT = {('HST','ACS','WFC'): 'CCDCHIP',
+                       ('HST','WFC3','IR'): 'FILTER_GD'
+                      }
+        instrument = (meta['TELESCOP'],meta['INSTRUME'],meta['DETECTOR'])
+        det = DETERMINANT[instrument]
+        val = meta[det]
+        file = conf[val]
         self.file = file
         self.value = None
     ##############################
@@ -23,8 +32,6 @@ class GrismCONF:
                          ,'XOFF_A','YOFF_A'
                          ,'DISP_ORDER_A'
                         ]):
-        import numpy as np
-        import copy
         x = open(self.file,'r')
         xx = x.readlines()
         if self.value:
