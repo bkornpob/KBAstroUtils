@@ -122,6 +122,7 @@ class PhotApCorr:
                          }
                   ,'ZPunit': ('filter','pivot wavelength Angstrom','ABMAG ZP INF')
                   ,'model': None
+                 }
                 }
         self.table = TABLE
         self.instrument = list(TABLE.keys())
