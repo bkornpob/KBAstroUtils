@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="kbastroutils",
-    version="2.4.0",
+    version="2.6.0",
     author="Kornpob Bhirombhakdi",
     author_email="kbhirombhakdi@stsci.edu",
     long_description=open("README.md").read(),
@@ -14,5 +14,5 @@ setuptools.setup(
         ,"License :: OSI Approved :: MIT License"
         ,"Operating System :: OS Independent"
     ],
-    python_requires='>=3.6'
+    python_requires='>=3'
 )

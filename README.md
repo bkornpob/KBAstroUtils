@@ -46,6 +46,10 @@ Known issues:
     
     - WFC3 subarray
     
+    - drz gets brighter about 10%
+    
+    - test new code with ACS-WFC, and other WFC3-IR
+    
 Next
     
     - Combine 1D spectra
@@ -53,7 +57,19 @@ Next
     - Use assertion for error handling (http://swcarpentry.github.io/python-novice-inflammation/09-defensive/index.html)
     
     - HST-ACS-WFC flux calibration
-        
+    
+    - Fix drz getting brigther
+    
+v.2.5.0
+
+    - Implement ACS subarray
+
+    - Implement ('HST','ACS','WFC') as identifier
+
+    - Implement grismcrclean.py, grismmodel.py, grismcalibpath.py, grismdrz.py
+
+    - Change grismconf.py, grismsens.py, gnd.py, dqmask.py
+            
 v.2.4.0
 
     - Implement grismmeta.py

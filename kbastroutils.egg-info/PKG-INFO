@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: kbastroutils
-Version: 2.4.0
+Version: 2.6.0
 Summary: UNKNOWN
 Home-page: https://github.com/bkornpob/kbastroutils
 Author: Kornpob Bhirombhakdi
@@ -54,6 +54,10 @@ Description: # KBAstroUtils
             
             - WFC3 subarray
             
+            - drz gets brighter about 10%
+            
+            - test new code with ACS-WFC, and other WFC3-IR
+            
         Next
             
             - Combine 1D spectra
@@ -61,7 +65,19 @@ Description: # KBAstroUtils
             - Use assertion for error handling (http://swcarpentry.github.io/python-novice-inflammation/09-defensive/index.html)
             
             - HST-ACS-WFC flux calibration
-                
+            
+            - Fix drz getting brigther
+            
+        v.2.5.0
+        
+            - Implement ACS subarray
+        
+            - Implement ('HST','ACS','WFC') as identifier
+        
+            - Implement grismcrclean.py, grismmodel.py, grismcalibpath.py, grismdrz.py
+        
+            - Change grismconf.py, grismsens.py, gnd.py, dqmask.py
+                    
         v.2.4.0
         
             - Implement grismmeta.py
@@ -144,5 +160,5 @@ Platform: UNKNOWN
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
-Requires-Python: >=3.6
+Requires-Python: >=3
 Description-Content-Type: text/markdown

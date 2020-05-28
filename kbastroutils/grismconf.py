@@ -7,19 +7,18 @@ class GrismCONF:
     x.show() >>> read the file each line
     x.fetch() >>> fecth lines with given keys, and wrap them
     ----------
-    
     GrismCONF is a class handling the read of the .conf files for grism reduction.
     """
-    def __init__(self,conf,meta):
-        DETERMINANT = {('HST','ACS','WFC'): 'CCDCHIP',
-                       ('HST','WFC3','IR'): 'FILTER_GD'
-                      }
-        instrument = (meta['TELESCOP'],meta['INSTRUME'],meta['DETECTOR'])
-        det = DETERMINANT[instrument]
-        val = meta[det]
-        file = conf[val]
-        self.file = file
-        self.value = None
+    def __init__(self,keysconf,meta,table):
+        identifier = meta['IDENTIFIER']
+        filterpair = meta['DIRECT'][1]
+        if identifier==('HST','WFC3','IR'):
+            conffile = table['CONF'][identifier][filterpair]
+        elif identifier==('HST','ACS','WFC'):
+            conffile = table['CONF'][identifier][(filterpair[0],filterpair[1],meta['CCDCHIP'])]
+            self.file = conffile
+            self.keysconf = keysconf
+            self.value = None
     ##############################
     def show(self):
         x = open(self.file,'r')
@@ -27,21 +26,14 @@ class GrismCONF:
         for i,ii in enumerate(x.readlines()):
             print(i,ii)
     ##############################
-    def fetch(self,keys=['BEAMA'
-                         ,'DYDX_ORDER_A'
-                         ,'XOFF_A','YOFF_A'
-                         ,'DISP_ORDER_A'
-                        ]):
+    def fetch(self,keysconf):
         x = open(self.file,'r')
         xx = x.readlines()
-        if self.value:
-            out = copy.deepcopy(self.value)
-        else:
-            out = {}
+        out = {}
         for i,ii in enumerate(xx):
             y = ii.split()
             if len(y) > 0:
-                if y[0] in keys:
+                if y[0] in keysconf:
                     try:
                         a = np.array(y[1:]).astype(float)
                     except:

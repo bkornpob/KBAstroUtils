@@ -13,110 +13,78 @@ class GrismMeta:
             self.meta[i] = {}
             self.meta[i]['ID'] = i
             self.meta[i]['FILE'] = ii
-        self.make_meta()
-        self.make_grismNdirect()
+        self.make_identifier()
+        self.make_basic()
+        self.make_advance()
         self.make_fullframe()
-    def make_grismNdirect(self):
-        keys = {
-            'DIRECT': ['F.+'],
-            'GRISM': ['G.+']
-        }
-        gid,did,nid = [],[],[]
+    #####
+    #####
+    #####
+    def make_identifier(self):
+        KEYS = {'PRIMARY': ['TELESCOP','INSTRUME','DETECTOR']}
         for i in self.meta:
-            nchip = self.meta[i]['NCHIP']
-            string = 'FILTER1' if nchip > 1 else 'FILTER'
-            filt = self.meta[i][string]
-            y = 'NONE'
-            for j in keys:
-                for k in keys[j]:
-                    if re.search(k,filt):
-                        y = copy.deepcopy(j)
-            if y=='DIRECT':
-                did.append(i)
-            elif y=='GRISM':
-                gid.append(i)
-            else:
-                nid.append(i)
-        self.gid = copy.deepcopy(gid)
-        self.did = copy.deepcopy(did)
-        self.nid = copy.deepcopy(nid)
-    def make_meta(self):
-        keys1 = {'PRIMARY': ['TELESCOP','INSTRUME','DETECTOR'
-                             ,'TARGNAME','RA_TARG','DEC_TARG'
-                             ,'EXPSTART','EXPTIME','POSTARG1','POSTARG2'
-                             ,'SUBARRAY'
-                            ]
-                }        
-        keys2 = {
-            ('HST','ACS','WFC'): {
-                'NCHIP': 2,
-                'PRIMARY': ['FILTER1','APERTURE'],
-                'EXT': 'Assign conditioning on SUBARRAY and APERTURE',
-                'SCI': ['CCDCHIP','IDCSCALE','BUNIT']
-            },
-            ('HST','WFC3','IR'): {
-                'NCHIP': 1,
-                'PRIMARY': ['FILTER'],
-                'EXT': ('SCI',1),
-                'SCI': ['IDCSCALE','BUNIT']
-            }
-        }                 
+            x = fits.open(self.meta[i]['FILE'])
+            iden = []
+            for j in KEYS:
+                for k in KEYS[j]:
+                    iden.append(x[j].header[k])
+            self.meta[i]['IDENTIFIER'] = copy.deepcopy(tuple(iden))
+    #####
+    #####
+    #####
+    def make_basic(self):
+        KEYS = {'PRIMARY': ['SUBARRAY','TARGNAME','RA_TARG','DEC_TARG',
+                            'EXPSTART','EXPTIME','POSTARG1','POSTARG2']}
         for i in self.meta:
-            x = fits.open(self.files[i])
-            #### keys1 ####
-            for j in keys1:
-                for k in keys1[j]:
-                    self.meta[i][k] = x[j].header[k]
-            #### keys2 ####
-            keyforkeys2 = (self.meta[i]['TELESCOP'],self.meta[i]['INSTRUME'],self.meta[i]['DETECTOR'])
-            if keyforkeys2 not in keys2.keys():
-                print('Error: {0} is not available. Remove {1} before running the program. Terminate'.format(keyforkeys2,self.files[i]))
-                sys.exit()
-            if keyforkeys2==('HST','WFC3','IR'):
-                for j in keys2[keyforkeys2]:
-                    if j in {'NCHIP','EXT'}:
-                        self.meta[i][j] = copy.deepcopy(keys2[keyforkeys2][j])
-                    else:
-                        for k in keys2[keyforkeys2][j]:
-                            self.meta[i][k] = x[j].header[k]
-            elif keyforkeys2==('HST','ACS','WFC'):
-                for j in keys2[keyforkeys2]:
-                    if j=='NCHIP':
-                        self.meta[i][j] = copy.deepcopy(keys2[keyforkeys2][j])
-                    elif j=='PRIMARY':
-                        for k in keys2[keyforkeys2][j]:
-                            self.meta[i][k] = x[j].header[k]
-                    elif j=='EXT':
-                        ext = None
-                        if self.meta[i]['SUBARRAY']:
-                            ext = ('SCI',1)
-                        else:
-                            if re.search('WFC2',self.meta[i]['APERTURE']):
-                                ext = ('SCI',1)
-                            elif re.search('WFC1',self.meta[i]['APERTURE']):
-                                ext = ('SCI',2)
-                        if not ext:
-                            print('Error: cannot assign ext. Terminate')
-                            sys.exit()
-                        else:
-                            self.meta[i][j] = copy.deepcopy(ext)
-                    elif j=='SCI':
-                        try:
-                            ext = self.meta[i]['EXT']
-                        except:
-                            print('Error: cannot read ext. Terminate')
-                            sys.exit()
-                        for k in keys2[keyforkeys2][j]:
-                            self.meta[i][k] = x[ext].header[k]
+            x = fits.open(self.meta[i]['FILE'])
+            for j in KEYS:
+                for k in KEYS[j]:
+                    try:
+                        self.meta[i][k] = x[j].header[k]
+                    except:
+                        self.meta[i][k] = None
+    #####
+    #####
+    #####
+    def make_advance(self):
+        for i in self.meta:
+            x = fits.open(self.meta[i]['FILE'])
+            identifier = self.meta[i]['IDENTIFIER']
+            if identifier == ('HST','WFC3','IR'):
+                ext = ('SCI',1)
+                self.meta[i]['EXT'] = ext
+                self.meta[i]['FILTER'] = x['PRIMARY'].header['FILTER']
+                self.meta[i]['IDCSCALE'] = x[ext].header['IDCSCALE']
+                self.meta[i]['BUNIT'] = x[ext].header['BUNIT']
+            elif identifier == ('HST','ACS','WFC'):
+                self.meta[i]['APERTURE'] = x['PRIMARY'].header['APERTURE']
+                self.meta[i]['FILTER'] = x['PRIMARY'].header['FILTER1']
+                ext = None
+                if self.meta[i]['SUBARRAY']:
+                    ext = ('SCI',1)
+                else:
+                    if re.search('WFC2',self.meta[i]['APERTURE']):
+                        ext = ('SCI',1)
+                    elif re.search('WFC1',self.meta[i]['APERTURE']):
+                        ext = ('SCI',2)
+                self.meta[i]['EXT'] = ext
+                self.meta[i]['CCDCHIP'] = x[ext].header['CCDCHIP']
+                self.meta[i]['IDCSCALE'] = x[ext].header['IDCSCALE']
+                self.meta[i]['BUNIT'] = x[ext].header['BUNIT']
+    #####
+    #####
+    #####
     def make_fullframe(self):
-        for i,ii in enumerate(self.files):
-            self.meta[i]['SUBARRAY_PARAMS'] = None
-            issub = self.meta[i]['SUBARRAY']
-            if not issub:
+        for i in self.meta:
+            if not self.meta[i]['SUBARRAY']:
+                continue
+            x = fits.open(self.meta[i]['FILE'])
+            ext = self.meta[i]['EXT']
+            identifier = self.meta[i]['IDENTIFIER']
+            if identifier == ('HST','WFC3','IR'):
                 pass
-            elif issub:
-                x = fits.open(ii)
-                hdr = x[self.meta[i]['EXT']].header
+            elif identifier == ('HST','ACS','WFC'):
+                hdr = x[ext].header
                 binsize,corner = utils_calib.get_corner(hdr,rsize=1)
-                self.meta[i]['SUBARRAY_PARAMS'] = {'binsize': binsize, 'corner': corner}
-           
+                self.meta[i]['SUBARRAY_PARAMS'] = {'BINSIZE':binsize, 'CORNER':corner}
+            

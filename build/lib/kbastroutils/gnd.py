@@ -4,7 +4,7 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
-from drizzlepac import astrodrizzle
+from scipy.interpolate import interp2d
 from photutils import CircularAnnulus,CircularAperture,aperture_photometry
 from photutils.utils import calc_total_error
 from photutils import centroid_sources,centroid_2dg,centroid_com
@@ -16,9 +16,12 @@ from kbastroutils.dqmask import DQMask
 from kbastroutils.make_sip import make_SIP
 from kbastroutils.photapcorr import PhotApCorr
 from kbastroutils.grismmeta import GrismMeta
+from kbastroutils.grismmodel import GrismModel
+from kbastroutils.grismcrclean import GrismCRClean
+from kbastroutils.grismcalibpath import GrismCalibPath
+from kbastroutils.grismdrz import GrismDRZ
 
-import copy,os,pickle,sys
-from shutil import copyfile
+import copy,os,pickle,sys,re,shutil
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,60 +31,142 @@ class GND:
         meta = GrismMeta(files)
         self.files = copy.deepcopy(meta.files)
         self.meta = copy.deepcopy(meta.meta)
-        self.gid = copy.deepcopy(meta.gid)
-        self.did = copy.deepcopy(meta.did)
-        self.nid = copy.deepcopy(meta.nid)        
     ####################
     ####################
     ####################
     def make_pair(self,pairs=None):
         if pairs:
             self.pairs = copy.deepcopy(pairs)
-            for i in pairs.keys():
-                gids = pairs[i]
-                for j in gids:
-                    self.meta[j]['DIRECT'] = i
-                    self.meta[j]['XYDIF'] = self.find_xydif(j,i)
+            gid,did = [],[]
+            for i in pairs:
+                did.append(i)
+                for j in pairs[i]:
+                    gid.append(j)
+                    self.meta[j]['DIRECT'] = (i,(self.meta[j]['FILTER'],self.meta[i]['FILTER']))
+            self.did = copy.deepcopy(did)
+            self.gid = copy.deepcopy(gid)
         else:
-            pairs = self.make_pairauto(by='EXPSTART')
-            self.make_pair(pairs)
-            self.make_pair_gdfilter()
-    def make_pair_gdfilter(self):
-        for i in self.gid:
-            string = 'FILTER' if self.meta[i]['NCHIP']==1 else 'FILTER1'
-            direct = self.meta[i]['DIRECT']
-            stringd = 'FILTER' if self.meta[direct]['NCHIP']==1 else 'FILTER1'
-            self.meta[i]['FILTER_GD'] = (self.meta[i][string],self.meta[direct][stringd])
-    def make_pairauto(self,by):
-        gid = copy.deepcopy(self.gid)
-        did = copy.deepcopy(self.did)
+            self.gid,self.did = self.make_pair_id()
+            pairs = self.make_pair_auto()
+            self.make_pair(pairs)  
+    def make_pair_id(self):
+        KEYS = {
+            'DIRECT': ['F.+'],
+            'GRISM': ['G.+']
+        }
+        gid,did = [],[]
+        for i in self.meta:
+            filt = self.meta[i]['FILTER']
+            y = None
+            for j in KEYS:
+                for k in KEYS[j]:
+                    if re.search(k,filt):
+                        y = j
+            if y=='DIRECT':
+                did.append(i)
+            elif y=='GRISM':
+                gid.append(i)
+            else:
+                print('Warning: cannot assign DIRECT or GRISM. {0} {1}'.format(i,self.meta[i]['FILE']))
+        return gid,did
+    def make_pair_auto(self):
+        KEY = 'EXPSTART'
+        out = {}
         dmeta = {}
         for i in self.did:
             dmeta[i] = self.meta[i]
         dtab = pd.DataFrame(dmeta).T
-        did,dval = dtab['ID'].values,dtab[by].values
+        did,dval = dtab['ID'].values,dtab[KEY].values
         tmp = []
         for i in self.gid:
-            gval = self.meta[i][by]
+            gval = self.meta[i][KEY]
             tmpp = np.abs(dval-gval)
             tmppp = np.where(tmpp == np.min(tmpp))[0][0]
             tmp.append((did[tmppp],i))
-        out = {}
         for i in tmp:
             if i[0] not in out.keys():
                 out[i[0]] = [i[1]]
             else:
                 tmpppp = out[i[0]]
                 tmpppp.append(i[1])
+        return out   
+    ####################
+    ####################
+    ####################  
+    def make_calibpath(self,
+                       keysconf=['DQMASK','DRZSCALE','BEAMA','DYDX_ORDER_A','XOFF_A','YOFF_A','DISP_ORDER_A'],
+                       keyssens=None
+                      ):
+        self.calibpath = GrismCalibPath()
+        self.make_calibpath_conf(keysconf)
+        self.make_calibpath_sens(keyssens)  
+    def make_calibpath_conf(self,keysconf):
+        for i in self.gid:
+            self.meta[i]['CONF'] = GrismCONF(keysconf,self.meta[i],self.calibpath.table)
+            self.meta[i]['CONF'].fetch(self.meta[i]['CONF'].keysconf)
+            self.meta[i]['CONF'].value['DQMASK'] = int(self.meta[i]['CONF'].value['DQMASK'][0])
+    def make_calibpath_sens(self,keyssens):
+        for i in self.gid:
+            self.meta[i]['SENS'] = GrismSens(keyssens,self.meta[i],self.calibpath.table)
+    ####################
+    ####################
+    #################### 
+    def make_crclean(self,identifier,group=None,params=None,run=False,outpath=None):
+        pairs = self.pairs
+        meta = self.meta
+        self.crclean = GrismCRClean(identifier,pairs,group,params,run,outpath,meta)
+        if run:
+            for i in self.crclean.meta:
+                self.meta[i]['CRCLEAN'] = self.crclean.meta[i]
+    ####################
+    ####################
+    ####################
+    def make_xyref(self):
+        self.make_xyoff()
+        self.make_xydif()
+        for j in self.gid:
+            xyoff = self.meta[j]['XYOFF']
+            xydif = self.meta[j]['XYDIF']
+            direct = self.meta[j]['DIRECT'][0]
+            xyd = self.meta[direct]['XYD']
+            xref = xyd[0] + xyoff[0] + xydif[0]
+            yref = xyd[1] + xyoff[1] + xydif[1]
+            xyref = (xref,yref)
+            self.meta[j]['XYREF'] = xyref 
+    def make_xyoff(self):
+        for i in self.gid:
+            coefxoff = self.meta[i]['CONF'].value['XOFF_A']
+            coefyoff = self.meta[i]['CONF'].value['YOFF_A']
+            orderx,ordery = self.make_xyofforder(coefxoff),self.make_xyofforder(coefyoff)
+            direct = self.meta[i]['DIRECT'][0]
+            xyd = self.meta[direct]['XYD']
+            if self.meta[i]['SUBARRAY']:
+                corner = self.meta[i]['SUBARRAY_PARAMS']['CORNER']
+                naxis1 = xyd[0] + corner[0]
+                naxis2 = xyd[1] + corner[1]
+                xoff = make_SIP(coefxoff,naxis1,naxis2,startx=True)
+                yoff = make_SIP(coefyoff,naxis2,naxis2,startx=True)
+            else:
+                xoff = make_SIP(coefxoff,xyd[0],xyd[1],startx=True)
+                yoff = make_SIP(coefyoff,xyd[0],xyd[1],startx=True)
+            self.meta[i]['XYOFF'] = (xoff[0],yoff[0])
+    def make_xyofforder(self,coef):
+        ncoef = len(coef)
+        out,n = 0,1
+        while n!=ncoef:
+            out += 1
+            n += out+1
         return out
-    def find_xydif(self,gid,did):
-        post1g,post2g = self.meta[gid]['POSTARG1'],self.meta[gid]['POSTARG2']
-        post1d,post2d = self.meta[did]['POSTARG1'],self.meta[did]['POSTARG2']
-        scaleg,scaled = self.meta[gid]["IDCSCALE"],self.meta[did]['IDCSCALE']
-        dx = post1g/scaleg - post1d/scaled
-        dy = post2g/scaleg - post2d/scaled
-        xydif = (dx,dy)
-        return xydif
+    def make_xydif(self):
+        for i in self.gid:
+            post1g,post2g = self.meta[i]['POSTARG1'],self.meta[i]['POSTARG2']
+            direct = self.meta[i]['DIRECT'][0]
+            post1d,post2d = self.meta[direct]['POSTARG1'],self.meta[direct]['POSTARG2']
+            scaleg,scaled = self.meta[i]["IDCSCALE"],self.meta[direct]['IDCSCALE']
+            dx = post1g/scaleg - post1d/scaled
+            dy = post2g/scaleg - post2d/scaled
+            xydif = (dx,dy)
+            self.meta[i]['XYDIF'] = copy.deepcopy(xydif)
     ####################
     ####################
     ####################
@@ -151,6 +236,247 @@ class GND:
     ####################
     ####################
     ####################
+    def make_traceNwavelength(self):
+        self.make_trace()
+        self.make_wavelength()
+    def make_trace(self):
+        for j in self.gid:
+            xhbound = self.meta[j]['CONF'].value['BEAMA']
+            xh = np.arange(xhbound[0],xhbound[1]+1,step=1)
+            xyref = self.meta[j]['XYREF']
+            order = self.meta[j]['CONF'].value['DYDX_ORDER_A']
+            sip = []
+            for k in np.arange(order+1):
+                string = 'DYDX_A_' + str(int(k))
+                coef = self.meta[j]['CONF'].value[string]
+                x = make_SIP(coef,*xyref,startx=True)
+                sip.append(x)
+            yh = np.full_like(xh,0.,dtype=float)
+            for k,kk in enumerate(sip):
+                yh += kk*xh**k
+            xg = xh + xyref[0]
+            yg = yh + xyref[1]
+            self.meta[j]['XG'] = xg
+            self.meta[j]['YG'] = yg
+            self.meta[j]['DYDX'] = sip
+    def make_wavelength(self):
+        varclength = np.vectorize(self.arclength)
+        for j in self.gid:
+            xhbound = self.meta[j]['CONF'].value['BEAMA']
+            xh = np.arange(xhbound[0],xhbound[1]+1,step=1)
+            xyref = self.meta[j]['XYREF']
+            order = self.meta[j]['CONF'].value['DISP_ORDER_A'].astype(int)
+            dydx = self.meta[j]['DYDX']
+            d = []
+            sip = []
+            for k in np.arange(order+1):
+                string = 'DLDP_A_' + str(int(k))
+                coef = self.meta[j]['CONF'].value[string]
+                x = make_SIP(coef,*xyref,startx=True)
+                sip.append(x)
+            arc,earc = np.array(varclength(xh,*dydx))
+            ww = np.full_like(xh,0.,dtype=float)
+            for k,kk in enumerate(sip):
+                ww += kk*arc**k
+            self.meta[j]['WW'] = ww    
+            self.meta[j]['WWUNIT'] = r'$\AA$'
+    def arclength_integrand(self,Fa,*coef):
+        s = 0
+        for i,ii in enumerate(coef):
+            if i==0:
+                continue
+            s += i * ii * (Fa**(i-1))
+        return np.sqrt(1. + np.power(s,2))
+    def arclength(self,Fa,*coef):
+        integral,err = quad(self.arclength_integrand, 0., Fa, args=coef)
+        return integral,err 
+    ####################
+    ####################
+    ####################
+    def make_bkg(self,method='median',sigma=3.,iters=5,usecrclean=True,maskin=None):
+        for j in self.gid:
+            x = fits.open(self.files[j])
+            ext = self.meta[j]['EXT']
+            identifier = self.meta[j]['IDENTIFIER']
+            filt = self.meta[j]['FILTER']
+            try:
+                xdq = fits.open(self.meta[j]['CRCLEAN'])[('DQ',ext[1])].data
+            except:
+                xdq = x[('DQ',ext[1])].data
+            xdata = x[ext].data
+            if not maskin:
+                maskin = [self.meta[j]['CONF'].value['DQMASK']]
+            a = DQMask(value=maskin,declass=True,makeclass=True)
+            a.make_mask(xdq)
+            mean,median,std = sigma_clipped_stats(xdata,mask=~a.mask,sigma=sigma,maxiters=iters)
+            self.meta[j]['BKG'] = None
+            self.meta[j]['BKG_FILE'] = None
+            if method=='median':
+                bkgim = np.full_like(xdata,median,dtype=float)
+                self.meta[j]['BKG'] = bkgim
+                self.meta[j]['BKG_FILE'] = (method,median,'No file')
+            elif method=='master':
+                if identifier==('HST','WFC3','IR'):
+                    bkg = self.calibpath.table['BKG'][identifier][filt]
+                elif identifier==('HST','ACS','WFC'):
+                    bkg = self.calibpath.table['BKG'][identifier][(self.meta[j]['CCDCHIP'])]
+                if not bkg:
+                    print('Error: bkg file is required. Terminate')
+                    sys.exit()
+                elif bkg:
+                    mask = np.full_like(a.mask,True,dtype=bool)
+                    mask[np.where(np.abs((xdata - median)/std) > sigma)] = False
+                    mask = copy.deepcopy(mask & a.mask)
+                    bkgdata = fits.open(bkg)[0].data
+                    if self.meta[j]['SUBARRAY']:
+                        shape = mask.shape
+                        corner = self.meta[j]['SUBARRAY_PARAMS']['CORNER']
+                        naxis1 = corner[0] + shape[1] 
+                        naxis2 = corner[1] + shape[0]
+                        tmp = bkgdata[corner[1]:naxis2,corner[0]:naxis1]
+                        bkgdata = copy.deepcopy(tmp)
+                    masktmp = np.full_like(mask,False,dtype=bool)
+                    m = np.where(bkgdata>0.)
+                    masktmp[m] = True
+                    mask = copy.deepcopy(mask & masktmp)
+                    scale = self.make_mastersky(xdata,mask,bkgdata)
+                    self.meta[j]['BKG'] = scale[0] * bkgdata
+                    self.meta[j]['BKG_FILE'] = (method,scale,bkg)
+    def make_mastersky(self,xdata,xmask,bkgdata):
+        x,y = bkgdata[xmask],xdata[xmask]
+        popt,pcov = curve_fit(lambda x, *p: p[0]*x, x,y,p0=[1.])
+        return (popt,pcov)
+    ####################
+    ####################
+    ####################    
+    def make_flat(self,method='uniform'):
+        for j in self.gid:
+            x = fits.open(self.files[j])
+            ext = self.meta[j]['EXT']
+            xdata = x[ext].data
+            identifier = self.meta[j]['IDENTIFIER']
+            filt = self.meta[j]['FILTER']
+            self.meta[j]['FLAT'] = None
+            self.meta[j]['FLAT_FILE'] = None
+            if method=='uniform':
+                flatim = np.full_like(xdata,1.,dtype=float)
+                self.meta[j]['FLAT'] = flatim
+                self.meta[j]['FLAT_FILE'] = (method,'No file')
+            elif method=='master':
+                if identifier==('HST','WFC3','IR'):
+                    flatfile = self.calibpath.table['FLAT'][identifier][filt]
+                elif identifier==('HST','ACS','WFC'):
+                    flatfile = self.calibpath.table['FLAT'][identifier][(self.meta[j]['CCDCHIP'])]
+                if not flatfile:
+                    print('Error: flat file is required. Set to None')
+                else:
+                    flatim = np.full_like(xdata,np.nan,dtype=float)
+                    nrow,ncol = xdata.shape[0],xdata.shape[1]
+                    y = fits.open(flatfile)
+                    wmin,wmax = y[0].header['WMIN'],y[0].header['WMAX']
+                    a = {}
+                    for k,kk in enumerate(y):
+                        if self.meta[j]['SUBARRAY']:
+                            shape = xdata.shape
+                            corner = self.meta[j]['SUBARRAY_PARAMS']['CORNER']
+                            naxis1 = corner[0] + shape[1] 
+                            naxis2 = corner[1] + shape[0]
+                            a[k] = y[k].data[corner[1]:naxis2,corner[0]:naxis1]
+                        else:
+                            a[k] = y[k].data
+                    x1 = np.copy(self.meta[j]['XG'].astype(int))
+                    w1 = np.copy(self.meta[j]['WW'])
+                    w1[np.where(w1<=wmin)],w1[np.where(w1>=wmax)] = wmin,wmax
+                    x1min,x1max = np.min(x1),np.max(x1)
+                    x0,x2 = np.arange(0,x1min),np.arange(x1max+1,ncol)
+                    w0,w2 = np.full_like(x0,wmin,dtype=float),np.full_like(x2,wmax,dtype=float)
+                    ww = np.concatenate((w0,w1,w2))
+                    ww = (ww - wmin) / (wmax - wmin)
+                    xx = np.concatenate((x0,x2,x2))
+                    s = 0.
+                    for k,kk in enumerate(a):
+                        s += a[k] * ww**k
+                    self.meta[j]['FLAT'] = np.copy(s)
+                    self.meta[j]['FLAT_FILE'] = (method,flatfile)
+    ####################
+    ####################
+    ####################
+    def make_pam(self,method='uniform'):
+        for j in self.gid:
+            x = fits.open(self.files[j])
+            xdata = x[self.meta[j]['EXT']].data
+            self.meta[j]['PAM'] = None
+            self.meta[j]['PAM_FILE'] = None
+            if method=='uniform':
+                self.meta[j]['PAM'] = np.full_like(xdata,1.,dtype=float)
+                self.meta[j]['PAM_FILE'] = (method,'No file')
+            elif method=='custom':
+                if not pamfile:
+                    print('Error: pamfile is required. Terminate')
+                    sys.exit()
+                self.meta[j]['PAM'] = np.copy(fits.open(pamfile)[1].data)
+                self.meta[j]['PAM_FILE'] = (method,pamfile)
+            elif method=='master':
+                print('Error: master method is not available in this version. Terminate')
+                sys.exit()
+    ####################
+    ####################
+    ####################
+    def make_clean(self,method=[True,True,False,False]):
+        for j in self.gid:
+            x = fits.open(self.files[j])
+            ext = self.meta[j]['EXT']
+            xdata = x[ext].data
+            bkg = self.meta[j]['BKG'] if method[0]==True else 0.
+            flat = self.meta[j]['FLAT'] if method[1]==True else 1.
+            pam = self.meta[j]['PAM'] if method[2]==True else 1.
+            tmp = (xdata - bkg) * pam
+            m = np.where(flat>0.)
+            cleandata = np.copy(tmp)
+            cleandata[m] = tmp[m] / flat[m]
+            if method[3]:
+                data = np.full_like(cleandata,0.,dtype=float)
+                bkglocal = self.meta[j]['BKG_LOCAL']['VAL']
+                corner = self.meta[j]['BKG_LOCAL']['PARAMS']['corner']
+                shape = self.meta[j]['BKG_LOCAL']['PARAMS']['shape']
+                data[corner[1]:corner[1]+shape[0],corner[0]:corner[0]+shape[1]] = copy.deepcopy(bkglocal)
+                cleandata = cleandata - data
+            self.meta[j]['CLEAN'] = np.copy(cleandata)
+    ####################
+    ####################
+    ####################
+    def make_drz(self,group=None,params=None,run=False,outpath=None):
+        pairs = self.pairs
+        meta = self.meta
+        self.drz = GrismDRZ(pairs,group,params,run,outpath,meta)
+    ####################
+    ####################
+    ####################
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     def make_photparams(self,method='aperture',apsize=5,apunit='pix',maskin=None
                         ,sigma=3.,iters=5
                         ,dobkgann=True,bkgann=(20.,25.)
@@ -159,8 +485,8 @@ class GND:
             instrument = '-'.join((self.meta[j]['TELESCOP'],self.meta[j]['INSTRUME'],self.meta[j]['DETECTOR']))
             self.meta[j]['PHOT_PARAMS'] = {}
             self.meta[j]['PHOT_PARAMS']['INSTRUMENT'] = instrument
-            nchip = self.meta[j]['NCHIP']
-            string = 'FILTER1' if nchip > 1 else 'FILTER'
+#             nchip = self.meta[j]['NCHIP']
+            string = 'FILTER'
             self.meta[j]['PHOT_PARAMS']['FILTER'] = self.meta[j][string]
             self.meta[j]['PHOT_PARAMS']['METHOD'] = method
             self.meta[j]['PHOT_PARAMS']['APSIZE'] = apsize
@@ -218,233 +544,9 @@ class GND:
             mag = -2.5 * np.log10((aptab['aperture_sum'] - bkg) / EE) + ZP
             emag = -2.5 * np.sqrt(aptab['aperture_sum_err']**2 + ebkg**2) / ((aptab['aperture_sum'] - bkg) * np.log(10.))
             self.meta[i]['ABMAG'] = (mag[0],emag[0])
-    ####################
-    ####################
-    ####################
-    def make_conf(self,conf,method='auto'
-                  ,keys=['BEAMA','DYDX_ORDER_A','XOFF_A','YOFF_A','DISP_ORDER_A']
-                 ):
-        if method=='auto':
-            for i in self.gid:
-                try:
-                    self.meta[i]['CONF'] = GrismCONF(conf,self.meta[i])
-                    self.meta[i]['CONF'].fetch(keys)
-                except:
-                    self.meta[i]['CONF'] = None
-        else:
-            print("Error: only method='auto' available. Terminate")
-            sys.exit()
-    ####################
-    ####################
-    ####################
-    def make_sens(self,sens,method='auto'):
-        if method=='auto':
-            for i in self.gid:
-                try:
-                    self.meta[i]['SENS'] = GrismSens(sens,self.meta[i])
-                except:
-                    self.meta[i]['SENS'] = None
-        else:
-            print("Error: only method='auto' available. Terminate")
-            sys.exit()
-    ####################
-    ####################
-    ####################
-    def make_bkg(self,bkg=None,maskin=[0],method='median',sigma=3.,iters=5):
-        for j in self.gid:
-            x = fits.open(self.files[j])
-            ext = self.meta[j]['EXT']
-            xdq = x[('DQ',ext[1])].data
-            xdata = x[ext].data
-            a = DQMask(maskin)
-            a.make_mask(xdq)
-            mean,median,std = sigma_clipped_stats(xdata[a.mask],sigma=sigma,maxiters=iters)
-            self.meta[j]['BKG'] = None
-            self.meta[j]['BKG_FILE'] = None
-            if method=='median':
-                bkgim = np.full_like(xdata,median,dtype=float)
-                self.meta[j]['BKG'] = bkgim
-                self.meta[j]['BKG_FILE'] = (method,median,'No file')
-            elif method=='master':
-                if not bkg:
-                    print('Error: bkg file is required. Set to None')
-                elif bkg:
-                    mask = np.full_like(a.mask,True,dtype=bool)
-                    mask[np.where(np.abs(xdata/std) > sigma)] = False
-                    mask = (mask & a.mask)
-                    bkgdata = fits.open(bkg)[0].data
-                    scale = self.make_mastersky(xdata,mask,bkgdata)
-                    self.meta[j]['BKG'] = scale[0] * bkgdata
-                    self.meta[j]['BKG_FILE'] = (method,scale,bkg)
-    ####################
-    ####################
-    ####################
-    def make_mastersky(self,xdata,xmask,bkgdata):
-        x,y = bkgdata[xmask],xdata[xmask]
-        popt,pcov = curve_fit(lambda x, *p: p[0]*x, x,y,p0=[1.])
-        return (popt,pcov)
-    ####################
-    ####################
-    ####################
-    def make_xyoff(self):
-        for i in self.gid:
-            coefxoff = self.meta[i]['CONF'].value['XOFF_A']
-            coefyoff = self.meta[i]['CONF'].value['YOFF_A']
-            orderx,ordery = self.make_xyofforder(coefxoff),self.make_xyofforder(coefyoff)
-            xyd = self.meta[self.meta[i]['DIRECT']]['XYD']
-            xoff = make_SIP(coefxoff,xyd[0],xyd[1],startx=True)
-            yoff = make_SIP(coefyoff,xyd[0],xyd[1],startx=True)
-            self.meta[i]['XYOFF'] = (xoff[0],yoff[0])
-    def make_xyofforder(self,coef):
-        ncoef = len(coef)
-        out,n = 0,1
-        while n!=ncoef:
-            out += 1
-            n += out+1
-        return out
-    ####################
-    ####################
-    ####################
-    def make_xyref(self):
-        for j in self.gid:
-            xyoff = self.meta[j]['XYOFF']
-            xydif = self.meta[j]['XYDIF']
-            xyd = self.meta[self.meta[j]['DIRECT']]['XYD']
-            xref = xyd[0] + xyoff[0] + xydif[0]
-            yref = xyd[1] + xyoff[1] + xydif[1]
-            xyref = (xref,yref)
-            self.meta[j]['XYREF'] = xyref 
-    ####################
-    ####################
-    ####################
-    def make_trace(self):
-        for j in self.gid:
-            xhbound = self.meta[j]['CONF'].value['BEAMA']
-            xh = np.arange(xhbound[0],xhbound[1]+1,step=1)
-            xyref = self.meta[j]['XYREF']
-            order = self.meta[j]['CONF'].value['DYDX_ORDER_A']
-            sip = []
-            for k in np.arange(order+1):
-                string = 'DYDX_A_' + str(int(k))
-                coef = self.meta[j]['CONF'].value[string]
-                x = make_SIP(coef,*xyref,startx=True)
-                sip.append(x)
-            yh = np.full_like(xh,0.,dtype=float)
-            for k,kk in enumerate(sip):
-                yh += kk*xh**k
-            xg = xh + xyref[0]
-            yg = yh + xyref[1]
-            self.meta[j]['XG'] = xg
-            self.meta[j]['YG'] = yg
-            self.meta[j]['DYDX'] = sip
-    ####################
-    ####################
-    ####################
-    def make_wavelength(self):
-        varclength = np.vectorize(self.arclength)
-        for j in self.gid:
-            xhbound = self.meta[j]['CONF'].value['BEAMA']
-            xh = np.arange(xhbound[0],xhbound[1]+1,step=1)
-            xyref = self.meta[j]['XYREF']
-            order = self.meta[j]['CONF'].value['DISP_ORDER_A'].astype(int)
-            dydx = self.meta[j]['DYDX']
-            d = []
-            sip = []
-            for k in np.arange(order+1):
-                string = 'DLDP_A_' + str(int(k))
-                coef = self.meta[j]['CONF'].value[string]
-                x = make_SIP(coef,*xyref,startx=True)
-                sip.append(x)
-            arc,earc = np.array(varclength(xh,*dydx))
-            ww = np.full_like(xh,0.,dtype=float)
-            for k,kk in enumerate(sip):
-                ww += kk*arc**k
-            self.meta[j]['WW'] = ww    
-            self.meta[j]['WWUNIT'] = r'$\AA$'
-    ####################
-    ####################
-    ####################
-    def arclength_integrand(self,Fa,*coef):
-        s = 0
-        for i,ii in enumerate(coef):
-            if i==0:
-                continue
-            s += i * ii * (Fa**(i-1))
-        return np.sqrt(1. + np.power(s,2))
-    def arclength(self,Fa,*coef):
-        integral,err = quad(self.arclength_integrand, 0., Fa, args=coef)
-        return integral,err    
-    ####################
-    ####################
-    ####################    
-    def make_flat(self,method='uniform',flatfile=None):
-        for j in self.gid:
-            x = fits.open(self.files[j])
-            xdata = x[self.meta[j]['EXT']].data
-            self.meta[j]['FLAT'] = None
-            self.meta[j]['FLAT_FILE'] = None
-            if method=='uniform':
-                flatim = np.full_like(xdata,1.,dtype=float)
-                self.meta[j]['FLAT'] = flatim
-                self.meta[j]['FLAT_FILE'] = (method,'No file')
-            elif method=='master':
-                if not flatfile:
-                    print('Error: flat file is required. Set to None')
-                else:
-                    flatim = np.full_like(xdata,np.nan,dtype=float)
-                    nrow,ncol = xdata.shape[0],xdata.shape[1]
-                    y = fits.open(flatfile)
-                    wmin,wmax = y[0].header['WMIN'],y[0].header['WMAX']
-                    a = {}
-                    for k,kk in enumerate(y):
-                        a[k] = y[k].data
-                    x1 = np.copy(self.meta[j]['XG'].astype(int))
-                    w1 = np.copy(self.meta[j]['WW'])
-                    w1[np.where(w1<=wmin)],w1[np.where(w1>=wmax)] = wmin,wmax
-                    x1min,x1max = np.min(x1),np.max(x1)
-                    x0,x2 = np.arange(0,x1min),np.arange(x1max+1,ncol)
-                    w0,w2 = np.full_like(x0,wmin,dtype=float),np.full_like(x2,wmax,dtype=float)
-                    ww = np.concatenate((w0,w1,w2))
-                    ww = (ww - wmin) / (wmax - wmin)
-                    xx = np.concatenate((x0,x2,x2))
-                    s = 0.
-                    for k,kk in enumerate(a):
-                        s += a[k] * ww**k
-                    self.meta[j]['FLAT'] = np.copy(s)
-                    self.meta[j]['FLAT_FILE'] = (method,flatfile)
-    ####################
-    ####################
-    ####################
-    def make_pam(self,method='uniform',pamfile=None):
-        for j in self.gid:
-            x = fits.open(self.files[j])
-            xdata = x[self.meta[j]['EXT']].data
-            self.meta[j]['PAM'] = None
-            self.meta[j]['PAM_FILE'] = None
-            if method=='uniform':
-                self.meta[j]['PAM'] = np.full_like(xdata,1.,dtype=float)
-                self.meta[j]['PAM_FILE'] = (method,'No file')
-            elif method=='custom':
-                if not pamfile:
-                    print('Error: pamfile is required. Terminate')
-                    sys.exit()
-                self.meta[j]['PAM'] = np.copy(fits.open(pamfile)[1].data)
-                self.meta[j]['PAM_FILE'] = (method,pamfile)
-            elif method=='master':
-                print('Error: master method is not available in this version. Terminate')
-                sys.exit()
-    ####################
-    ####################
-    ####################
-    def make_clean(self,method=[True,True,True]):
-        for j in self.gid:
-            x = fits.open(self.files[j])
-            xdata = x[self.meta[j]['EXT']].data
-            bkg = self.meta[j]['BKG'] if method[0]==True else 0.
-            flat = self.meta[j]['FLAT'] if method[1]==True else 1.
-            pam = self.meta[j]['PAM'] if method[2]==True else 1.
-            cleandata = (xdata - bkg) * pam / flat
-            self.meta[j]['CLEAN'] = np.copy(cleandata)
+
+
+
     ####################
     ####################
     ####################
@@ -481,11 +583,9 @@ class GND:
     def make_exparams(self,method='aperture',apsize=5,apunit='pix',maskin=None):
         for j in self.gid:
             self.meta[j]['EX_PARAMS'] = {}
-            nchip = self.meta[j]['NCHIP']
-            string = 'FILTER1' if nchip > 1 else 'FILTER'
-            instrument = '-'.join((self.meta[j]['TELESCOP']
-                                   ,self.meta[j]['INSTRUME']
-                                   ,self.meta[j]['DETECTOR']
+#             nchip = self.meta[j]['NCHIP']
+            string = 'FILTER'
+            instrument = '-'.join((*self.meta[j]['IDENTIFIER']
                                    ,self.meta[j][string]
                                   ))
             self.meta[j]['EX_PARAMS']['INSTRUMENT'] = instrument
@@ -507,7 +607,20 @@ class GND:
     ####################
     ####################
     ####################
-    def make_count(self,replace=None):
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    def make_count(self,replace=None,usedrz=False):
         for j in self.gid:
             xg = self.meta[j]['XG'].astype(int)
             yg = self.meta[j]['YG'].astype(int)
@@ -528,10 +641,31 @@ class GND:
             else:
                 print('Error: method must be aperture. Terminate')
                 sys.exit()
+        if usedrz:
+            for j in self.drz.meta:
+                xg = self.drz.meta[j]['XG'].astype(int)
+                yg = self.drz.meta[j]['YG'].astype(int)
+                xdata = self.drz.meta[j]['CLEAN']
+                bunit = 'ELECTRONS/S'
+                apsize = self.drz.meta[j]['EX_PARAMS']['APSIZE']
+                apunit = self.drz.meta[j]['EX_PARAMS']['APUNIT']
+                method = self.drz.meta[j]['EX_PARAMS']['METHOD']
+                maskin = self.drz.meta[j]['EX_PARAMS']['MASKIN']
+                if apunit!='pix':
+                    print('Error: apunit must be pix. Terminate')
+                    sys.exit()
+                if method=='aperture':
+                    cc = np.full_like(xg,np.nan,dtype=float)
+                    for k,kk in enumerate(xg):
+                        cc[k] = np.sum(xdata[yg[k]-apsize:yg[k]+apsize+1,xg[k]])
+                    self.drz.meta[j]['COUNT'] = np.copy(cc)  
+                else:
+                    print('Error: method must be aperture. Terminate')
+                    sys.exit()
     ####################
     ####################
     ####################
-    def make_flam(self):
+    def make_flam(self,usedrz=False):
         for j in self.gid:
             count = self.meta[j]['COUNT']
             apcorr = self.meta[j]['APCORR']
@@ -543,6 +677,18 @@ class GND:
             if self.meta[j]['BUNIT'] == 'ELECTRONS':
                 self.meta[j]['FLAM'] = copy.deepcopy(self.meta[j]['FLAM'] / self.meta[j]['EXPTIME'])
             self.meta[j]['FLAMUNIT'] = r'erg/s/cm$^2$/$\AA$'
+        if usedrz:
+            for j in self.drz.meta:
+                count = self.drz.meta[j]['COUNT']
+                apcorr = self.drz.meta[j]['APCORR']
+                wavebin = self.drz.meta[j]['WAVEBIN']
+                ww = self.drz.meta[j]['WW']
+                ss = self.drz.meta[j]['SENS'].model(ww)
+                flam = count / (wavebin * apcorr * ss)
+                self.drz.meta[j]['FLAM'] = np.copy(flam)
+                if self.drz.meta[j]['BUNIT'] == 'ELECTRONS':
+                    self.drz.meta[j]['FLAM'] = copy.deepcopy(self.drz.meta[j]['FLAM'] / self.drz.meta[j]['EXPTIME'])
+                self.drz.meta[j]['FLAMUNIT'] = r'erg/s/cm$^2$/$\AA$'
     ####################
     ####################
     ####################
@@ -563,7 +709,7 @@ class GND:
     ####################
     ####################
     ####################
-    def show(self,method='meta'
+    def show(self,method='meta',scale=('percentile',5.,95.)
              ,column=None,dosort=True,sort = ['EXPSTART','POSTARG1','POSTARG2','FILTER']
              ,traceon=False,dqon=False
              ,normalize=False
@@ -573,6 +719,7 @@ class GND:
              ,xmin=None, xmax=None
              ,ymin=None, ymax=None
              ,output=False
+             ,ylog=False
             ):
         if method=='meta':
             tab = pd.DataFrame(self.meta).T
@@ -588,7 +735,14 @@ class GND:
                 x = fits.open(self.files[i])
                 xdata = x[self.meta[i]['EXT']].data
                 m = np.where(np.isfinite(xdata))
-                vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                vmin,vmax=None,None
+                if scale[0]=='percentile':
+                    vmin,vmax = np.percentile(xdata[m],scale[1]),np.percentile(xdata[m],scale[2])
+                elif scale[0]=='value':
+                    vmin,vmax = scale[1],scale[2]
+                else:
+                    print("Error: scale must be either percentile or value. Set to ('percentile',5.,95.).")
+                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                 plt.figure(figsize=(10,10))
                 plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                 plt.title('{0} {1}'.format(i,self.files[i]))
@@ -605,7 +759,14 @@ class GND:
                     x = fits.open(self.files[j])
                     xdata = x[self.meta[i]['EXT']].data
                     m = np.where(np.isfinite(xdata))
-                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                    vmin,vmax=None,None
+                    if scale[0]=='percentile':
+                        vmin,vmax = np.percentile(xdata[m],scale[1]),np.percentile(xdata[m],scale[2])
+                    elif scale[0]=='value':
+                        vmin,vmax = scale[1],scale[2]
+                    else:
+                        print("Error: scale must be either percentile or value. Set to ('percentile',5.,95.).")
+                        vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     plt.figure(figsize=(10,10))
                     plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     plt.title('{0} {1}'.format(j,self.files[j]))
@@ -712,25 +873,24 @@ class GND:
                     ax[1].set_title('pam')
                     ax[2].set_title('corrected')
         if method=='stamp':
-            for i in self.pairs:
-                for j in self.pairs[i]:
-                    ext = self.meta[j]['EXT']
-                    xdata = fits.open(self.files[j])[ext].data
-                    xdq = fits.open(self.files[j])[('DQ',ext[1])].data
-                    m = np.where(np.isfinite(xdata))
-                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
-                    stamp = self.meta[j]['STAMP']
+            for j in self.gid:
+                ext = self.meta[j]['EXT']
+                xdata = fits.open(self.files[j])[ext].data
+                xdq = fits.open(self.files[j])[('DQ',ext[1])].data
+                m = np.where(np.isfinite(xdata))
+                vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                stamp = self.meta[j]['STAMP']
+                plt.figure(figsize=(10,10))
+                plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                plt.xlim(stamp[0][0],stamp[0][1])
+                plt.ylim(stamp[1][0],stamp[1][1])
+                plt.title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
+                if dqon:
                     plt.figure(figsize=(10,10))
-                    plt.imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                    plt.imshow(xdq,origin='lower',cmap='viridis',vmin=0,vmax=1)
                     plt.xlim(stamp[0][0],stamp[0][1])
                     plt.ylim(stamp[1][0],stamp[1][1])
-                    plt.title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
-                    if dqon:
-                        plt.figure(figsize=(10,10))
-                        plt.imshow(xdq,origin='lower',cmap='viridis',vmin=0,vmax=1)
-                        plt.xlim(stamp[0][0],stamp[0][1])
-                        plt.ylim(stamp[1][0],stamp[1][1])
-                        plt.title('DQ vmin=0, vmax=1')
+                    plt.title('DQ vmin=0, vmax=1')
         if method=='WW':
             for i in self.pairs:
                 for j in self.pairs[i]:
@@ -761,7 +921,14 @@ class GND:
                     xdata = fits.open(self.files[j])[self.meta[j]['EXT']].data
                     cleandata = self.meta[j]['CLEAN']
                     m = np.where(np.isfinite(xdata))
-                    vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                    vmin,vmax=None,None
+                    if scale[0]=='percentile':
+                        vmin,vmax = np.percentile(xdata[m],scale[1]),np.percentile(xdata[m],scale[2])
+                    elif scale[0]=='value':
+                        vmin,vmax = scale[1],scale[2]
+                    else:
+                        print("Error: scale must be either percentile or value. Set to ('percentile',5.,95.).")
+                        vmin,vmax = np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
                     ax[0].imshow(xdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[1].imshow(cleandata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
                     ax[0].set_title('{0} {1}'.format(j,self.files[j].split('/')[-1]))
@@ -797,55 +964,79 @@ class GND:
                     plt.plot(ww[mask],flam[mask],label='{0} {1}'.format(j,self.files[j].split('/')[-1]))
                 plt.ylabel('{0}'.format(flamunit))
                 plt.xlabel('{0}'.format(wwunit))
+                if ylog:
+                    plt.yscale('log')
                 if ymin or ymax:
                     ymin = np.min(flam[mask]) if not ymin else ymin
                     ymax = np.max(flam[mask]) if not ymax else ymax
                     plt.ylim(ymin,ymax)
-                plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1)                     
+                plt.legend(bbox_to_anchor=(1.04,1),loc='upper left',ncol=1) 
+        if method=='bkglocal':
+            for i in self.gid:
+                fig,ax = plt.subplots(1,3,figsize=(30,10))
+                data = self.meta[i]['CLEAN']
+                bkglocal = self.meta[i]['BKG_LOCAL']['VAL']
+                corner = self.meta[i]['BKG_LOCAL']['PARAMS']['corner']
+                shape = self.meta[i]['BKG_LOCAL']['PARAMS']['shape']
+                stampdata = data[corner[1]:corner[1]+shape[0],corner[0]:corner[0]+shape[1]]
+                m = np.where(np.isfinite(stampdata))
+                vmin,vmax = np.percentile(stampdata[m],5.),np.percentile(stampdata[m],95.)
+                ax[0].imshow(stampdata,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                ax[1].imshow(bkglocal,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                sub = stampdata - bkglocal
+                ax[2].imshow(sub,origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+        if method=='drz':
+            for i in self.drz.meta:
+                x = self.drz.meta[i]
+                xdata = x['CLEAN']
+                plt.figure(figsize=(10,10))
+                m = np.where(np.isfinite(xdata))
+                vmin,vmax=np.percentile(xdata[m],5.),np.percentile(xdata[m],95.)
+                plt.imshow(x['CLEAN'],origin='lower',cmap='viridis',vmin=vmin,vmax=vmax)
+                plt.plot(x['XG'],x['YG'],color='red')
+                plt.scatter(*x['XYREF'],color='red')
     ####################
     ####################
     ####################                
-#     def make_drz(self):
-#         num = len(self.files)
-#         self.make_clean(method=[True,True,False])
-#         for i in self.pairs:
-#             x = []
-#             for j in self.pairs[i]:
-#                 dst = os.getcwd() + '/' + self.files[j].split('/')[-1]
-#                 copyfile(self.files[j],dst)
-#                 xx = fits.open(dst)
-#                 stamp = self.meta[j]['STAMP']
-#                 xx['SCI'].data[stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]] = np.copy(self.meta[j]['CLEAN'][stamp[1][0]:stamp[1][1],stamp[0][0]:stamp[0][1]])
-#                 xx.writeto(dst,overwrite=True)
-#                 xx.close()                  
-#                 x.append(dst)
-#             path = os.getcwd() + '/{0}'.format(num)
-#             drz = path + '_drz.fits'
-#             astrodrizzle.AstroDrizzle(x
-#                                       ,output=path
-#                                       ,build=True
-#                                       ,clean=True
-#                                       ,skysub='no'
-#                                       ,final_wcs=True
-#                                       ,final_kernel='gaussian'
-#                                       ,combine_type='median'
-#                                       ,final_refimage=x[0]
-#                                      ) 
-#             self.make_drzmeta(i,num,drz,ref=0)
-#             for j in x:
-#                 os.remove(j)
-#             num += 1
-#     def make_drzmeta(self,direct,num,drz,ref=0):
-#         self.files.append(drz)
-#         self.pairs[direct].append(num)
-#         i = self.pairs[direct][ref]
-#         xdata = fits.open(drz)['SCI'].data
-#         self.meta[num] = copy.deepcopy(self.meta[i])
-#         self.meta[num]['ID'] = num
-#         self.meta[num]['FILE'] = drz
-#         self.meta[num]['BKG'],self.meta[num]['BKG_FILE'] = np.full_like(xdata,0.,dtype=float),'drz'
-#         self.meta[num]['FLAT'],self.meta[num]['FLAT_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
-#         self.meta[num]['PAM'],self.meta[num]['PAM_FILE'] = np.full_like(xdata,1.,dtype=float),'drz'
-    ####################
-    ####################
-    ####################
+    def make_localbkg(self,method=(['polynomial','1d'],[3,3.]),apsize=(6,10),maskin=[0],show=False):
+        for i in self.gid:
+            xg = self.meta[i]['XG'].astype(int)
+            yg = self.meta[i]['YG'].astype(int)
+            xmin,xmax = min(xg),max(xg)
+            yminout,yminin = min(yg)-apsize[1],min(yg)-apsize[0]
+            ymaxout,ymaxin = max(yg)+apsize[1],max(yg)+apsize[0]
+            data = copy.deepcopy(self.meta[i]['CLEAN'])
+            dq = copy.deepcopy(fits.open(self.meta[i]['FILE'])[('DQ',self.meta[i]['EXT'][1])].data)
+            stampdata = copy.deepcopy(data[yminout:ymaxout+1,xmin:xmax+1])
+            stampdq = copy.deepcopy(dq[yminout:ymaxout+1,xmin:xmax+1])
+            ### make mask ###
+            mask = DQMask(maskin)
+            mask.make_mask(stampdq)
+            tmp = np.full_like(mask.mask,True,dtype=bool)
+            shape = tmp.shape
+            a = apsize[1] - apsize[0] + 1
+            b = shape[0] - a
+            tmp[a:b,:] = False
+            outmask = (mask.mask & tmp)
+            #################
+            ### method ###
+            if method[0]==['polynomial','1d']:
+                x = np.arange(0,shape[0])
+                y = np.arange(0,shape[1])
+                z = (stampdata * outmask)
+                z[z<=0.] = np.nan
+                deg,std = method[1][0],method[1][1]
+                zfit = np.full_like(z,np.nan,dtype=float)
+                for j in y:
+                    tmpz = z[:,j].copy()
+                    m = np.where(np.isfinite(tmpz))
+                    init = np.zeros(deg+1,dtype=float)
+                    init[0] = np.median(tmpz[m])
+                    popt,pcov = curve_fit(GrismModel.polynomial1d,x[m],tmpz[m],p0=init)
+                    zfit[:,j] = copy.deepcopy(GrismModel.polynomial1d(x,*popt))
+                zfit2 = GrismModel.convolution_gauss2d(zfit,std)   
+                self.meta[i]['BKG_LOCAL'] = {}
+                self.meta[i]['BKG_LOCAL']['PARAMS'] = {'corner':(xmin,yminout),'shape':zfit2.shape,'conf':(method,apsize,maskin)}
+                self.meta[i]['BKG_LOCAL']['VAL'] = copy.deepcopy(zfit2)
+        if show:
+            self.show(method='bkglocal')
